@@ -1,0 +1,25 @@
+{
+  "name": "bmore-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Family Fun in Bmore — Airbnb-style booking platform powered by SonicJS",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply DB",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local"
+  },
+  "dependencies": {
+    "@sonicjs-cms/core": "file:./sonicjs-cms-core-2.8.0.tgz"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "hono": "^4.11.7",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.59.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

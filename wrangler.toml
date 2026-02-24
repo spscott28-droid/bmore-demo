@@ -1,0 +1,31 @@
+name = "bmore-demo"
+main = "src/index.ts"
+compatibility_date = "2025-05-05"
+compatibility_flags = ["nodejs_compat"]
+
+# Cloudflare Workers settings
+workers_dev = true
+
+# D1 Database
+# 1. Run: wrangler d1 create bmore-db
+# 2. Paste the database_id below
+[[d1_databases]]
+binding = "DB"
+database_name = "bmore-db"
+database_id = "YOUR_DATABASE_ID_HERE"
+migrations_dir = "./node_modules/@sonicjs-cms/core/migrations"
+
+# R2 Bucket for media storage (optional — needed for admin file uploads)
+# 1. Run: wrangler r2 bucket create bmore-media
+# 2. Uncomment the lines below
+# [[r2_buckets]]
+# binding = "MEDIA_BUCKET"
+# bucket_name = "bmore-media"
+
+# Environment variables
+[vars]
+ENVIRONMENT = "development"
+
+# Observability (optional)
+[observability]
+enabled = true
