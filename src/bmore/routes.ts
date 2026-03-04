@@ -838,9 +838,12 @@ function renderVenueDetailPage(v: VenueData) {
   const typeLabel = VENUE_TYPE_LABELS[v.venueType] || v.venueType
   const amenityList = v.amenities.split(',').map(a => a.trim())
   const amenityLabels: Record<string, string> = {
-    tables: '🪑 Tables', chairs: '💺 Chairs', kitchen: '🍳 Kitchen',
-    sound_system: '🔊 Sound System', projector: '📽️ Projector', wifi: '📶 WiFi',
-    parking: '🅿️ Parking', stage: '🎭 Stage', gymnasium: '🏀 Gymnasium', patio: '🌿 Patio',
+    tables: '🪑 Tables', chairs: '💺 Chairs', kitchen: '🍳 Kitchen', kitchenette: '🍳 Kitchenette',
+    sound_system: '🔊 Sound System', indoor_outdoor_speakers: '🔊 Indoor/Outdoor Speakers',
+    projector: '📽️ Projector', smart_board: '📺 Smart Board', wifi: '📶 WiFi',
+    parking: '🅿️ Parking', stage: '🎭 Stage', gymnasium: '🏀 Gymnasium',
+    patio: '🌿 Patio', courtyard: '🌿 Courtyard', outdoor_space: '🌳 Outdoor Space',
+    ada_accessible: '♿ ADA Accessible',
   }
 
   const stars = '★'.repeat(Math.floor(v.rating)) + (v.rating % 1 >= 0.5 ? '½' : '')
