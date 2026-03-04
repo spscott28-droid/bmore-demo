@@ -36,6 +36,10 @@ const app = new Hono()
 
 let collectionsSynced = false
 
+// Fixed ID for the system user that owns public form submissions (bookings, contacts, seeded venues).
+// Created once via INSERT OR IGNORE so the FK constraint on content.author_id is always satisfied.
+const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
+
 async function ensureCollectionsSynced(db: D1Database): Promise<void> {
   // Confirm migrations have run — bail out if the collections table doesn't exist yet
   try {
@@ -44,8 +48,15 @@ async function ensureCollectionsSynced(db: D1Database): Promise<void> {
     return
   }
 
-  const configs = [venuesCollection, bookingsCollection, contactsCollection]
   const now = Date.now()
+
+  // Ensure system user exists so public form submissions can satisfy the author_id FK
+  await db.prepare(
+    `INSERT OR IGNORE INTO users (id, email, username, first_name, last_name, role, is_active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(SYSTEM_USER_ID, 'system@bmore.local', 'system', 'System', 'User', 'viewer', 1, now, now).run()
+
+  const configs = [venuesCollection, bookingsCollection, contactsCollection]
 
   for (const col of configs) {
     const exists = await db

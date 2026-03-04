@@ -11,6 +11,10 @@ import { bmoreLayout } from './layout'
 import { VENUES, EVENT_TYPES, VENUE_TYPE_LABELS, ALCOHOL_LABELS } from './venue-data'
 import type { VenueData } from './venue-data'
 
+// Must match SYSTEM_USER_ID in src/index.ts — the user created on startup to satisfy
+// the author_id FK constraint for public form submissions and seeded content.
+const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
+
 const bmore = new Hono()
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -37,7 +41,7 @@ async function getVenuesFromDB(db: D1Database): Promise<VenueData[]> {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           crypto.randomUUID(), col.id, venue.slug, venue.title,
-          JSON.stringify(venue), 'published', 'system', now, now
+          JSON.stringify(venue), 'published', SYSTEM_USER_ID, now, now
         ).run()
       }
       return VENUES
@@ -702,7 +706,7 @@ bmore.post('/book', async (c) => {
     `booking-${id.slice(0, 8)}`,
     `${body.eventName || 'Booking'} - ${body.contactName || 'Guest'}`,
     JSON.stringify({ ...body, bookingRef, status: 'pending' }),
-    'published', 'system', now, now
+    'published', SYSTEM_USER_ID, now, now
   ).run()
 
   return c.json({ success: true, bookingId: bookingRef, message: 'Booking request received! We will confirm within 24 hours.' })
@@ -1642,7 +1646,7 @@ bmore.post('/contact', async (c) => {
         `contact-${id.slice(0, 8)}`,
         `Contact: ${body.name || 'Anonymous'} - ${body.subject || 'General'}`,
         JSON.stringify({ ...body, status: 'new' }),
-        'published', 'system', now, now
+        'published', SYSTEM_USER_ID, now, now
       ).run()
     }
   } catch {
