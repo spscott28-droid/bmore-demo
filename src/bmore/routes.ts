@@ -137,8 +137,10 @@ async function getPageFromDB(db: D1Database, slug: string): Promise<PageData | n
     ).first<{ id: string }>()
     if (!col) return null
 
+    // Prefer published, but fall back to draft so admin edits show up even if
+    // the user saved without clicking "Save & Publish"
     const row = await db.prepare(
-      "SELECT data FROM content WHERE collection_id = ? AND slug = ? AND status = 'published' LIMIT 1"
+      "SELECT data FROM content WHERE collection_id = ? AND slug = ? AND status IN ('published','draft') ORDER BY CASE status WHEN 'published' THEN 0 ELSE 1 END LIMIT 1"
     ).bind(col.id, slug).first()
     if (!row) return null
 
@@ -2216,6 +2218,120 @@ bmore.get('/seed-turnstile', async (c) => {
   } catch (err: unknown) {
     return c.json({ error: 'Failed to configure Turnstile', detail: String(err) }, 500)
   }
+})
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEED DB TABLES — creates any missing tables that SonicJS Stage 6+ migrations
+// may not have run (user_profiles, activity_logs, etc.)
+// Visit /seed-db-tables once if the user edit page throws a 500.
+// ─────────────────────────────────────────────────────────────────────────────
+bmore.get('/seed-db-tables', async (c) => {
+  const db = c.env.DB
+  const results: string[] = []
+
+  const tables = [
+    {
+      name: 'user_profiles',
+      sql: `CREATE TABLE IF NOT EXISTS user_profiles (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        display_name TEXT,
+        bio TEXT,
+        company TEXT,
+        job_title TEXT,
+        website TEXT,
+        location TEXT,
+        date_of_birth INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(user_id)
+      )`,
+    },
+    {
+      name: 'activity_logs',
+      sql: `CREATE TABLE IF NOT EXISTS activity_logs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT REFERENCES users(id),
+        action TEXT NOT NULL,
+        resource_type TEXT,
+        resource_id TEXT,
+        details TEXT,
+        ip_address TEXT,
+        user_agent TEXT,
+        created_at INTEGER NOT NULL
+      )`,
+    },
+    {
+      name: 'user_sessions',
+      sql: `CREATE TABLE IF NOT EXISTS user_sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL,
+        ip_address TEXT,
+        user_agent TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        expires_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        last_used_at INTEGER
+      )`,
+    },
+  ]
+
+  for (const t of tables) {
+    try {
+      await db.prepare(t.sql).run()
+      results.push(`✓ ${t.name}`)
+    } catch (err) {
+      results.push(`✗ ${t.name}: ${String(err)}`)
+    }
+  }
+
+  // Also add any missing columns to the users table (Stage 6 ALTER TABLE)
+  const userCols = [
+    "ALTER TABLE users ADD COLUMN phone TEXT",
+    "ALTER TABLE users ADD COLUMN bio TEXT",
+    "ALTER TABLE users ADD COLUMN avatar_url TEXT",
+    "ALTER TABLE users ADD COLUMN timezone TEXT DEFAULT 'UTC'",
+    "ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'",
+    "ALTER TABLE users ADD COLUMN email_notifications INTEGER DEFAULT 1",
+    "ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'dark'",
+    "ALTER TABLE users ADD COLUMN two_factor_enabled INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0",
+  ]
+  for (const sql of userCols) {
+    try {
+      await db.prepare(sql).run()
+      const col = sql.split('ADD COLUMN ')[1].split(' ')[0]
+      results.push(`✓ users.${col}`)
+    } catch {
+      // Column likely already exists — that's fine
+    }
+  }
+
+  return c.json({ success: true, results })
+})
+
+// Debug: show exactly what is stored in the DB for a given page slug
+bmore.get('/debug-page/:slug', async (c) => {
+  const db = c.env.DB
+  const slug = c.req.param('slug')
+  const col = await db.prepare("SELECT id FROM collections WHERE name = 'pages' LIMIT 1").first<{id:string}>()
+  if (!col) return c.json({ error: 'no pages collection' })
+  const row = await db.prepare("SELECT id, slug, title, status, data FROM content WHERE collection_id = ? AND slug = ? LIMIT 1").bind(col.id, slug).first()
+  if (!row) return c.json({ error: 'page not found', slug })
+  return c.json({ id: row.id, slug: row.slug, title: row.title, status: row.status, data: JSON.parse(row.data as string) })
+})
+
+// Force-publish all pages collection content so admin edits always show up
+bmore.get('/publish-pages', async (c) => {
+  const db = c.env.DB
+  const col = await db.prepare("SELECT id FROM collections WHERE name = 'pages' LIMIT 1").first<{id:string}>()
+  if (!col) return c.json({ error: 'no pages collection' })
+  const result = await db.prepare(
+    "UPDATE content SET status = 'published', updated_at = ? WHERE collection_id = ? AND status = 'draft'"
+  ).bind(Date.now(), col.id).run()
+  return c.json({ success: true, rowsUpdated: result.meta?.changes ?? 0, message: 'All draft pages are now published' })
 })
 
 export default bmore
