@@ -15,6 +15,13 @@ database_name = "bmore-db"
 database_id = "YOUR_DATABASE_ID_HERE"
 migrations_dir = "./node_modules/@sonicjs-cms/core/migrations"
 
+# KV Namespace for caching (required by SonicJS)
+# For remote deployment: wrangler kv namespace create CACHE_KV
+# Then paste the id below
+[[kv_namespaces]]
+binding = "CACHE_KV"
+id = "YOUR_KV_NAMESPACE_ID_HERE"
+
 # R2 Bucket for media storage (optional — needed for admin file uploads)
 # 1. Run: wrangler r2 bucket create bmore-media
 # 2. Uncomment the lines below
@@ -29,3 +36,19 @@ ENVIRONMENT = "development"
 # Observability (optional)
 [observability]
 enabled = true
+
+# ── Preview environment ──
+[env.preview]
+workers_dev = true
+
+[env.preview.vars]
+ENVIRONMENT = "preview"
+
+# ── Production environment ──
+[env.production]
+workers_dev = false
+# Uncomment and set your domain when ready:
+# routes = [{ pattern = "yourdomain.com/*", zone_name = "yourdomain.com" }]
+
+[env.production.vars]
+ENVIRONMENT = "production"

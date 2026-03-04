@@ -77,7 +77,7 @@ export function bmoreLayout(title: string, content: HtmlEscapedString, options?:
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <!-- Logo -->
-        <a href="/bmore" class="flex items-center gap-2">
+        <a href="/" class="flex items-center gap-2">
           <span class="text-2xl">🎉</span>
           <span class="font-display font-bold text-xl text-gray-900">Family Fun</span>
           <span class="font-display font-bold text-xl text-orange-500">in Bmore</span>
@@ -85,15 +85,15 @@ export function bmoreLayout(title: string, content: HtmlEscapedString, options?:
 
         <!-- Desktop Nav -->
         <div class="hidden md:flex items-center gap-8">
-          ${navLink('/bmore', 'Home', 'home')}
-          ${navLink('/bmore/venues', 'Venues', 'venues')}
-          ${navLink('/bmore/book', 'Book a Space', 'book')}
-          ${navLink('/bmore/about', 'About', 'about')}
-          ${navLink('/bmore/contact', 'Contact', 'contact')}
+          ${navLink('/', 'Home', 'home')}
+          ${navLink('/venues', 'Venues', 'venues')}
+          ${navLink('/book', 'Book a Space', 'book')}
+          ${navLink('/about', 'About', 'about')}
+          ${navLink('/contact', 'Contact', 'contact')}
         </div>
 
         <!-- CTA Button -->
-        <a href="/bmore/book" class="hidden md:inline-flex items-center px-4 py-2 bg-orange-500 text-white font-semibold rounded-lg hover:bg-orange-600 transition-colors shadow-sm">
+        <a href="/book" class="hidden md:inline-flex items-center px-4 py-2 bg-orange-500 text-white font-semibold rounded-lg hover:bg-orange-600 transition-colors shadow-sm">
           Book Now
         </a>
 
@@ -109,12 +109,12 @@ export function bmoreLayout(title: string, content: HtmlEscapedString, options?:
     <!-- Mobile Nav -->
     <div id="mobile-menu" class="hidden md:hidden border-t border-gray-100 bg-white">
       <div class="px-4 py-3 space-y-3">
-        <a href="/bmore" class="block text-gray-700 hover:text-orange-500">Home</a>
-        <a href="/bmore/venues" class="block text-gray-700 hover:text-orange-500">Venues</a>
-        <a href="/bmore/book" class="block text-gray-700 hover:text-orange-500">Book a Space</a>
-        <a href="/bmore/about" class="block text-gray-700 hover:text-orange-500">About</a>
-        <a href="/bmore/contact" class="block text-gray-700 hover:text-orange-500">Contact</a>
-        <a href="/bmore/book" class="block bg-orange-500 text-white text-center py-2 rounded-lg font-semibold">Book Now</a>
+        <a href="/" class="block text-gray-700 hover:text-orange-500">Home</a>
+        <a href="/venues" class="block text-gray-700 hover:text-orange-500">Venues</a>
+        <a href="/book" class="block text-gray-700 hover:text-orange-500">Book a Space</a>
+        <a href="/about" class="block text-gray-700 hover:text-orange-500">About</a>
+        <a href="/contact" class="block text-gray-700 hover:text-orange-500">Contact</a>
+        <a href="/book" class="block bg-orange-500 text-white text-center py-2 rounded-lg font-semibold">Book Now</a>
       </div>
     </div>
   </nav>
@@ -144,10 +144,10 @@ export function bmoreLayout(title: string, content: HtmlEscapedString, options?:
         <div>
           <h4 class="font-semibold text-white mb-4">Quick Links</h4>
           <ul class="space-y-2 text-sm">
-            <li><a href="/bmore/venues" class="hover:text-orange-400 transition-colors">Browse Venues</a></li>
-            <li><a href="/bmore/book" class="hover:text-orange-400 transition-colors">Book a Space</a></li>
-            <li><a href="/bmore/about" class="hover:text-orange-400 transition-colors">About Us</a></li>
-            <li><a href="/bmore/contact" class="hover:text-orange-400 transition-colors">Contact</a></li>
+            <li><a href="/venues" class="hover:text-orange-400 transition-colors">Browse Venues</a></li>
+            <li><a href="/book" class="hover:text-orange-400 transition-colors">Book a Space</a></li>
+            <li><a href="/about" class="hover:text-orange-400 transition-colors">About Us</a></li>
+            <li><a href="/contact" class="hover:text-orange-400 transition-colors">Contact</a></li>
           </ul>
         </div>
 
@@ -155,10 +155,10 @@ export function bmoreLayout(title: string, content: HtmlEscapedString, options?:
         <div>
           <h4 class="font-semibold text-white mb-4">Venue Types</h4>
           <ul class="space-y-2 text-sm">
-            <li><a href="/bmore/venues?type=church" class="hover:text-orange-400 transition-colors">Church Halls</a></li>
-            <li><a href="/bmore/venues?type=rec_center" class="hover:text-orange-400 transition-colors">Recreation Centers</a></li>
-            <li><a href="/bmore/venues?type=community_center" class="hover:text-orange-400 transition-colors">Community Centers</a></li>
-            <li><a href="/bmore/venues?type=library" class="hover:text-orange-400 transition-colors">Libraries</a></li>
+            <li><a href="/venues?type=church" class="hover:text-orange-400 transition-colors">Church Halls</a></li>
+            <li><a href="/venues?type=rec_center" class="hover:text-orange-400 transition-colors">Recreation Centers</a></li>
+            <li><a href="/venues?type=community_center" class="hover:text-orange-400 transition-colors">Community Centers</a></li>
+            <li><a href="/venues?type=library" class="hover:text-orange-400 transition-colors">Libraries</a></li>
           </ul>
         </div>
 
