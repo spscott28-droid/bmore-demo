@@ -87,6 +87,10 @@ app.use('*', async (c, next) => {
   await next()
 })
 
+// Redirect /admin and /admin/ to /admin/dashboard
+app.get('/admin', (c) => c.redirect('/admin/dashboard'))
+app.get('/admin/', (c) => c.redirect('/admin/dashboard'))
+
 // Mount Family Fun in Bmore public site at root
 app.route('/', bmoreRoutes)
 
