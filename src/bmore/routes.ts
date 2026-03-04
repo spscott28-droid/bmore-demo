@@ -269,26 +269,30 @@ bmore.get('/seed', async (c) => {
 
   if (!col) return c.json({ error: 'Venues collection not found. Run migrations first and make sure the admin panel has been visited at least once.' }, 500)
 
-  // Check if already seeded
-  const existing = await db.prepare(
-    "SELECT COUNT(*) as count FROM content WHERE collection_id = ?"
-  ).bind(col.id).first<{ count: number }>()
+  // Upsert all venues — inserts new ones, skips existing (by slug)
+  let added = 0
+  let skipped = 0
+  const authorId = await getAuthorId(db)
+  const now = Date.now()
 
-  if (existing && existing.count > 0) {
-    return c.json({ message: `Already seeded (${existing.count} venues exist)` })
-  }
-
-  // Insert all venues
   for (const venue of VENUES) {
-    const id = crypto.randomUUID()
-    const now = Date.now()
-    await db.prepare(`
-      INSERT INTO content (id, collection_id, slug, title, data, status, author_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(id, col.id, venue.slug, venue.title, JSON.stringify(venue), 'published', await getAuthorId(db), now, now).run()
+    const exists = await db.prepare(
+      "SELECT id FROM content WHERE collection_id = ? AND slug = ?"
+    ).bind(col.id, venue.slug).first<{ id: string }>()
+
+    if (exists) {
+      skipped++
+    } else {
+      const id = crypto.randomUUID()
+      await db.prepare(`
+        INSERT INTO content (id, collection_id, slug, title, data, status, author_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(id, col.id, venue.slug, venue.title, JSON.stringify(venue), 'published', authorId, now, now).run()
+      added++
+    }
   }
 
-  return c.json({ success: true, message: `Seeded ${VENUES.length} venues` })
+  return c.json({ success: true, message: `Venues synced: ${added} added, ${skipped} already existed` })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
