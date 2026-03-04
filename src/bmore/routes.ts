@@ -14,15 +14,113 @@ import type { VenueData } from './venue-data'
 const bmore = new Hono()
 
 // ─────────────────────────────────────────────────────────────────────────────
+// D1 DATABASE HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function getVenuesFromDB(db: D1Database): Promise<VenueData[]> {
+  try {
+    const col = await db.prepare(
+      "SELECT id FROM collections WHERE name = ? AND is_active = 1"
+    ).bind("venues").first<{ id: string }>()
+    if (!col) return []
+
+    const { results } = await db.prepare(
+      "SELECT * FROM content WHERE collection_id = ? AND status = 'published'"
+    ).bind(col.id).all()
+
+    // Collection exists but has no venues — auto-seed from hardcoded data
+    if (results.length === 0) {
+      const now = Date.now()
+      for (const venue of VENUES) {
+        await db.prepare(
+          `INSERT INTO content (id, collection_id, slug, title, data, status, author_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(), col.id, venue.slug, venue.title,
+          JSON.stringify(venue), 'published', 'system', now, now
+        ).run()
+      }
+      return VENUES
+    }
+
+    return results.map(row => ({
+      ...JSON.parse(row.data as string),
+      title: row.title as string,
+      slug: row.slug as string,
+    }))
+  } catch {
+    return []
+  }
+}
+
+async function getVenueBySlug(db: D1Database, slug: string): Promise<VenueData | null> {
+  try {
+    const col = await db.prepare(
+      "SELECT id FROM collections WHERE name = ? AND is_active = 1"
+    ).bind("venues").first<{ id: string }>()
+
+    if (!col) {
+      // DB not initialised yet (migrations not run) — graceful degradation
+      return VENUES.find(v => v.slug === slug) ?? null
+    }
+
+    const row = await db.prepare(
+      "SELECT * FROM content WHERE collection_id = ? AND slug = ?"
+    ).bind(col.id, slug).first()
+    if (!row) return null  // Collection is in DB but this slug isn't → 404
+
+    return { ...JSON.parse(row.data as string), title: row.title as string, slug: row.slug as string }
+  } catch {
+    return VENUES.find(v => v.slug === slug) ?? null
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEED ROUTE
+// ─────────────────────────────────────────────────────────────────────────────
+
+bmore.get('/seed', async (c) => {
+  const db = c.env.DB
+  const col = await db.prepare(
+    "SELECT id FROM collections WHERE name = ? AND is_active = 1"
+  ).bind("venues").first<{ id: string }>()
+
+  if (!col) return c.json({ error: 'Venues collection not found. Run migrations first and make sure the admin panel has been visited at least once.' }, 500)
+
+  // Check if already seeded
+  const existing = await db.prepare(
+    "SELECT COUNT(*) as count FROM content WHERE collection_id = ?"
+  ).bind(col.id).first<{ count: number }>()
+
+  if (existing && existing.count > 0) {
+    return c.json({ message: `Already seeded (${existing.count} venues exist)` })
+  }
+
+  // Insert all venues
+  for (const venue of VENUES) {
+    const id = crypto.randomUUID()
+    const now = Date.now()
+    await db.prepare(`
+      INSERT INTO content (id, collection_id, slug, title, data, status, author_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(id, col.id, venue.slug, venue.title, JSON.stringify(venue), 'published', '6b27b79e-9936-47a7-936e-7ec8aab43ac9', now, now).run()
+  }
+
+  return c.json({ success: true, message: `Seeded ${VENUES.length} venues` })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // HOME PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-bmore.get('/', (c) => {
-  const featured = VENUES.slice(0, 6)
-  return c.html(bmoreLayout('Home', renderHomePage(featured), { activeNav: 'home' }))
+bmore.get('/', async (c) => {
+  let venues = await getVenuesFromDB(c.env.DB)
+  if (venues.length === 0) venues = VENUES
+  const featured = venues.slice(0, 6)
+  return c.html(bmoreLayout('Home', renderHomePage(featured, venues), { activeNav: 'home' }))
 })
 
-function renderHomePage(featured: VenueData[]) {
+function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES) {
   return html`
     <!-- Hero Section -->
     <section class="relative overflow-hidden">
@@ -40,11 +138,11 @@ function renderHomePage(featured: VenueData[]) {
                 for your next celebration — all within 5 miles of Patterson Park.
               </p>
               <div class="flex flex-col sm:flex-row gap-4">
-                <a href="/bmore/book" class="inline-flex items-center justify-center px-8 py-4 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors shadow-lg text-lg">
+                <a href="/book" class="inline-flex items-center justify-center px-8 py-4 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors shadow-lg text-lg">
                   Book a Space
                   <svg class="w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
                 </a>
-                <a href="/bmore/venues" class="inline-flex items-center justify-center px-8 py-4 border-2 border-white/30 text-white font-semibold rounded-xl hover:bg-white/10 transition-colors text-lg">
+                <a href="/venues" class="inline-flex items-center justify-center px-8 py-4 border-2 border-white/30 text-white font-semibold rounded-xl hover:bg-white/10 transition-colors text-lg">
                   Browse Venues
                 </a>
               </div>
@@ -133,7 +231,7 @@ function renderHomePage(featured: VenueData[]) {
             <h2 class="font-display text-3xl font-bold text-gray-900 mb-2">Featured Venues</h2>
             <p class="text-gray-500">Hand-picked spaces perfect for your next family event</p>
           </div>
-          <a href="/bmore/venues" class="hidden sm:inline-flex items-center text-orange-500 font-semibold hover:text-orange-600">
+          <a href="/venues" class="hidden sm:inline-flex items-center text-orange-500 font-semibold hover:text-orange-600">
             View All
             <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
           </a>
@@ -142,7 +240,7 @@ function renderHomePage(featured: VenueData[]) {
           ${featured.map(v => renderVenueCard(v))}
         </div>
         <div class="text-center mt-8 sm:hidden">
-          <a href="/bmore/venues" class="inline-flex items-center text-orange-500 font-semibold hover:text-orange-600">
+          <a href="/venues" class="inline-flex items-center text-orange-500 font-semibold hover:text-orange-600">
             View All Venues
             <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
           </a>
@@ -159,7 +257,7 @@ function renderHomePage(featured: VenueData[]) {
         </div>
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           ${EVENT_TYPES.slice(0, 5).map(et => html`
-            <a href="/bmore/book?eventType=${et.value}" class="bg-gray-50 rounded-xl p-6 text-center card-hover hover:bg-orange-50 transition-colors">
+            <a href="/book?eventType=${et.value}" class="bg-gray-50 rounded-xl p-6 text-center card-hover hover:bg-orange-50 transition-colors">
               <span class="text-4xl block mb-3">${et.icon}</span>
               <p class="font-semibold text-gray-800 text-sm">${et.label}</p>
             </a>
@@ -167,7 +265,7 @@ function renderHomePage(featured: VenueData[]) {
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 max-w-3xl mx-auto">
           ${EVENT_TYPES.slice(5).map(et => html`
-            <a href="/bmore/book?eventType=${et.value}" class="bg-gray-50 rounded-xl p-6 text-center card-hover hover:bg-orange-50 transition-colors">
+            <a href="/book?eventType=${et.value}" class="bg-gray-50 rounded-xl p-6 text-center card-hover hover:bg-orange-50 transition-colors">
               <span class="text-4xl block mb-3">${et.icon}</span>
               <p class="font-semibold text-gray-800 text-sm">${et.label}</p>
             </a>
@@ -194,7 +292,7 @@ function renderHomePage(featured: VenueData[]) {
       <div class="max-w-4xl mx-auto px-4 text-center text-white">
         <h2 class="font-display text-3xl md:text-4xl font-bold mb-4">Ready to Plan Your Event?</h2>
         <p class="text-orange-100 text-lg mb-8 max-w-2xl mx-auto">Our booking wizard makes it easy to find and reserve the perfect space for your family gathering.</p>
-        <a href="/bmore/book" class="inline-flex items-center px-8 py-4 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors shadow-lg text-lg">
+        <a href="/book" class="inline-flex items-center px-8 py-4 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors shadow-lg text-lg">
           Start Booking Now
         </a>
       </div>
@@ -215,11 +313,11 @@ function renderHomePage(featured: VenueData[]) {
           icon: L.divIcon({ className: '', html: '<div style="background:#14b8a6;border:3px solid white;border-radius:50%;width:24px;height:24px;box-shadow:0 2px 8px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:12px;">🌳</div>', iconSize: [24,24], iconAnchor: [12,12] })
         }).addTo(map).bindPopup('<b>Patterson Park</b><br>The heart of our neighborhood');
 
-        const venues = ${raw(JSON.stringify(VENUES.map(v => ({ title: v.title, lat: v.latitude, lng: v.longitude, slug: v.slug, type: v.venueType, rate: v.hourlyRate }))))};
+        const venues = ${raw(JSON.stringify(allVenues.map(v => ({ title: v.title, lat: v.latitude, lng: v.longitude, slug: v.slug, type: v.venueType, rate: v.hourlyRate }))))};
         venues.forEach(v => {
           L.marker([v.lat, v.lng], {
             icon: L.divIcon({ className: '', html: '<div class="venue-pin"></div>', iconSize: [20,20], iconAnchor: [10,10] })
-          }).addTo(map).bindPopup('<b>' + v.title + '</b><br>From $' + v.rate + '/hr<br><a href="/bmore/venues/' + v.slug + '" style="color:#f97316;">View Details &rarr;</a>');
+          }).addTo(map).bindPopup('<b>' + v.title + '</b><br>From $' + v.rate + '/hr<br><a href="/venues/' + v.slug + '" style="color:#f97316;">View Details &rarr;</a>');
         });
       });
     </script>
@@ -241,7 +339,7 @@ function renderVenueCard(v: VenueData) {
   }
 
   return html`
-    <a href="/bmore/venues/${v.slug}" class="bg-white rounded-xl overflow-hidden shadow-sm card-hover block">
+    <a href="/venues/${v.slug}" class="bg-white rounded-xl overflow-hidden shadow-sm card-hover block">
       <div class="relative">
         <img src="${v.imageUrl}" alt="${v.title}" class="w-full h-48 object-cover" loading="lazy" />
         <span class="absolute top-3 left-3 px-2 py-1 rounded-full text-xs font-semibold ${typeColor[v.venueType] || 'bg-gray-100 text-gray-700'}">
@@ -272,13 +370,15 @@ function renderVenueCard(v: VenueData) {
 // VENUES LISTING PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-bmore.get('/venues', (c) => {
+bmore.get('/venues', async (c) => {
+  let allVenues = await getVenuesFromDB(c.env.DB)
+  if (allVenues.length === 0) allVenues = VENUES
   const typeFilter = c.req.query('type') || ''
-  const venues = typeFilter ? VENUES.filter(v => v.venueType === typeFilter) : VENUES
-  return c.html(bmoreLayout('Venues', renderVenuesPage(venues, typeFilter), { activeNav: 'venues' }))
+  const venues = typeFilter ? allVenues.filter(v => v.venueType === typeFilter) : allVenues
+  return c.html(bmoreLayout('Venues', renderVenuesPage(venues, typeFilter, allVenues), { activeNav: 'venues' }))
 })
 
-function renderVenuesPage(venues: VenueData[], typeFilter: string) {
+function renderVenuesPage(venues: VenueData[], typeFilter: string, allVenuesForMap: VenueData[] = VENUES) {
   const types = [
     { value: '', label: 'All Venues' },
     { value: 'church', label: 'Church Halls' },
@@ -298,7 +398,7 @@ function renderVenuesPage(venues: VenueData[], typeFilter: string) {
         <!-- Filters -->
         <div class="flex flex-wrap gap-2 mt-6">
           ${types.map(t => html`
-            <a href="/bmore/venues${t.value ? '?type=' + t.value : ''}"
+            <a href="/venues${t.value ? '?type=' + t.value : ''}"
                class="px-4 py-2 rounded-full text-sm font-medium transition-colors
                       ${typeFilter === t.value ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}">
               ${t.label}
@@ -328,7 +428,7 @@ function renderVenuesPage(venues: VenueData[], typeFilter: string) {
             <div class="mt-4 bg-orange-50 rounded-xl p-4">
               <h4 class="font-semibold text-gray-900 mb-2">Need help choosing?</h4>
               <p class="text-gray-600 text-sm mb-3">Our booking wizard matches you with venues based on your event needs.</p>
-              <a href="/bmore/book" class="inline-flex items-center text-orange-600 font-semibold text-sm hover:text-orange-700">
+              <a href="/book" class="inline-flex items-center text-orange-600 font-semibold text-sm hover:text-orange-700">
                 Start Booking Wizard
                 <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
               </a>
@@ -349,11 +449,11 @@ function renderVenuesPage(venues: VenueData[], typeFilter: string) {
           icon: L.divIcon({ className: '', html: '<div style="background:#14b8a6;border:3px solid white;border-radius:50%;width:24px;height:24px;box-shadow:0 2px 8px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:12px;">🌳</div>', iconSize: [24,24], iconAnchor: [12,12] })
         }).addTo(map).bindPopup('<b>Patterson Park</b>');
 
-        const venues = ${raw(JSON.stringify(VENUES.map(v => ({ title: v.title, lat: v.latitude, lng: v.longitude, slug: v.slug, rate: v.hourlyRate }))))};
+        const venues = ${raw(JSON.stringify(allVenuesForMap.map(v => ({ title: v.title, lat: v.latitude, lng: v.longitude, slug: v.slug, rate: v.hourlyRate }))))};
         venues.forEach(v => {
           L.marker([v.lat, v.lng], {
             icon: L.divIcon({ className: '', html: '<div class="venue-pin"></div>', iconSize: [20,20], iconAnchor: [10,10] })
-          }).addTo(map).bindPopup('<b>' + v.title + '</b><br>$' + v.rate + '/hr<br><a href="/bmore/venues/' + v.slug + '" style="color:#f97316;">Details &rarr;</a>');
+          }).addTo(map).bindPopup('<b>' + v.title + '</b><br>$' + v.rate + '/hr<br><a href="/venues/' + v.slug + '" style="color:#f97316;">Details &rarr;</a>');
         });
       });
     </script>
@@ -364,15 +464,15 @@ function renderVenuesPage(venues: VenueData[], typeFilter: string) {
 // VENUE DETAIL PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-bmore.get('/venues/:slug', (c) => {
+bmore.get('/venues/:slug', async (c) => {
   const slug = c.req.param('slug')
-  const venue = VENUES.find(v => v.slug === slug)
+  const venue = await getVenueBySlug(c.env.DB, slug)
   if (!venue) {
     return c.html(bmoreLayout('Not Found', html`
       <div class="max-w-4xl mx-auto px-4 py-20 text-center">
         <h1 class="font-display text-4xl font-bold text-gray-900 mb-4">Venue Not Found</h1>
         <p class="text-gray-500 mb-8">We couldn't find that venue. It may have been removed or the URL is incorrect.</p>
-        <a href="/bmore/venues" class="inline-flex items-center px-6 py-3 bg-orange-500 text-white font-semibold rounded-lg hover:bg-orange-600">Browse All Venues</a>
+        <a href="/venues" class="inline-flex items-center px-6 py-3 bg-orange-500 text-white font-semibold rounded-lg hover:bg-orange-600">Browse All Venues</a>
       </div>
     `))
   }
@@ -522,7 +622,7 @@ function renderVenueDetailPage(v: VenueData) {
                   <span class="font-medium">$${v.hourlyRate * 8}</span>
                 </div>
               </div>
-              <a href="/bmore/book?venue=${v.slug}" class="block w-full bg-orange-500 text-white text-center py-3 rounded-lg font-semibold hover:bg-orange-600 transition-colors">
+              <a href="/book?venue=${v.slug}" class="block w-full bg-orange-500 text-white text-center py-3 rounded-lg font-semibold hover:bg-orange-600 transition-colors">
                 Book This Venue
               </a>
               <p class="text-gray-400 text-xs text-center mt-3">Free cancellation up to 48 hours before</p>
@@ -572,21 +672,44 @@ function renderVenueDetailPage(v: VenueData) {
 // BOOKING WIZARD (multi-step)
 // ─────────────────────────────────────────────────────────────────────────────
 
-bmore.get('/book', (c) => {
+bmore.get('/book', async (c) => {
   const preselectedVenue = c.req.query('venue') || ''
   const preselectedEventType = c.req.query('eventType') || ''
-  return c.html(bmoreLayout('Book a Space', renderBookingPage(preselectedVenue, preselectedEventType), { activeNav: 'book' }))
+  let venues = await getVenuesFromDB(c.env.DB)
+  if (venues.length === 0) venues = VENUES
+  return c.html(bmoreLayout('Book a Space', renderBookingPage(preselectedVenue, preselectedEventType, venues), { activeNav: 'book' }))
 })
 
 bmore.post('/book', async (c) => {
-  // Handle booking submission
   const body = await c.req.json()
-  // In a real app, this would save to D1 via the content API
-  return c.json({ success: true, bookingId: 'BK-' + Date.now(), message: 'Booking request received! We will confirm within 24 hours.' })
+  const db = c.env.DB
+
+  const col = await db.prepare(
+    "SELECT id FROM collections WHERE name = ? AND is_active = 1"
+  ).bind("bookings").first<{ id: string }>()
+
+  if (!col) return c.json({ error: 'Bookings collection not found' }, 500)
+
+  const id = crypto.randomUUID()
+  const now = Date.now()
+  const bookingRef = 'BK-' + now
+
+  await db.prepare(`
+    INSERT INTO content (id, collection_id, slug, title, data, status, author_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    id, col.id,
+    `booking-${id.slice(0, 8)}`,
+    `${body.eventName || 'Booking'} - ${body.contactName || 'Guest'}`,
+    JSON.stringify({ ...body, bookingRef, status: 'pending' }),
+    'published', 'system', now, now
+  ).run()
+
+  return c.json({ success: true, bookingId: bookingRef, message: 'Booking request received! We will confirm within 24 hours.' })
 })
 
-function renderBookingPage(preselectedVenue: string, preselectedEventType: string) {
-  const venueData = preselectedVenue ? VENUES.find(v => v.slug === preselectedVenue) : null
+function renderBookingPage(preselectedVenue: string, preselectedEventType: string, venues: VenueData[] = VENUES) {
+  const venueData = preselectedVenue ? venues.find(v => v.slug === preselectedVenue) : null
 
   return html`
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -932,8 +1055,8 @@ function renderBookingPage(preselectedVenue: string, preselectedEventType: strin
             <!-- Populated by JS -->
           </div>
           <div class="flex flex-col sm:flex-row gap-4 justify-center">
-            <a href="/bmore" class="px-6 py-3 bg-orange-500 text-white font-semibold rounded-xl hover:bg-orange-600">Back to Home</a>
-            <a href="/bmore/venues" class="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50">Browse More Venues</a>
+            <a href="/" class="px-6 py-3 bg-orange-500 text-white font-semibold rounded-xl hover:bg-orange-600">Back to Home</a>
+            <a href="/venues" class="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50">Browse More Venues</a>
           </div>
         </div>
       </div>
@@ -942,7 +1065,7 @@ function renderBookingPage(preselectedVenue: string, preselectedEventType: strin
     <!-- Booking Wizard Script -->
     <script>
       // ── Venue data (for filtering) ──
-      const allVenues = ${raw(JSON.stringify(VENUES))}
+      const allVenues = ${raw(JSON.stringify(venues))}
       let currentStep = 1
       let bookingMap = null
       let calendarYear, calendarMonth
@@ -1265,7 +1388,7 @@ function renderBookingPage(preselectedVenue: string, preselectedEventType: strin
         }
 
         try {
-          const res = await fetch('/bmore/book', {
+          const res = await fetch('/book', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(booking)
@@ -1315,11 +1438,13 @@ function renderBookingPage(preselectedVenue: string, preselectedEventType: strin
 // ABOUT PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-bmore.get('/about', (c) => {
-  return c.html(bmoreLayout('About', renderAboutPage(), { activeNav: 'about' }))
+bmore.get('/about', async (c) => {
+  let venues = await getVenuesFromDB(c.env.DB)
+  if (venues.length === 0) venues = VENUES
+  return c.html(bmoreLayout('About', renderAboutPage(venues), { activeNav: 'about' }))
 })
 
-function renderAboutPage() {
+function renderAboutPage(allVenues: VenueData[] = VENUES) {
   return html`
     <!-- Hero -->
     <section class="bg-white">
@@ -1456,8 +1581,8 @@ function renderAboutPage() {
         <h2 class="font-display text-3xl font-bold mb-4">Ready to Find Your Space?</h2>
         <p class="text-orange-100 text-lg mb-8">Browse our curated collection of family-friendly venues near Patterson Park.</p>
         <div class="flex flex-col sm:flex-row gap-4 justify-center">
-          <a href="/bmore/venues" class="px-8 py-4 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors shadow-lg">Browse Venues</a>
-          <a href="/bmore/contact" class="px-8 py-4 border-2 border-white/30 text-white font-semibold rounded-xl hover:bg-white/10 transition-colors">Get in Touch</a>
+          <a href="/venues" class="px-8 py-4 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors shadow-lg">Browse Venues</a>
+          <a href="/contact" class="px-8 py-4 border-2 border-white/30 text-white font-semibold rounded-xl hover:bg-white/10 transition-colors">Get in Touch</a>
         </div>
       </div>
     </section>
@@ -1478,7 +1603,7 @@ function renderAboutPage() {
           icon: L.divIcon({ className: '', html: '<div style="background:#14b8a6;border:3px solid white;border-radius:50%;width:24px;height:24px;box-shadow:0 2px 8px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:12px;">🌳</div>', iconSize: [24,24], iconAnchor: [12,12] })
         }).addTo(map).bindPopup('<b>Patterson Park</b>');
 
-        const venues = ${raw(JSON.stringify(VENUES.map(v => ({ title: v.title, lat: v.latitude, lng: v.longitude }))))};
+        const venues = ${raw(JSON.stringify(allVenues.map(v => ({ title: v.title, lat: v.latitude, lng: v.longitude }))))};
         venues.forEach(v => {
           L.marker([v.lat, v.lng], {
             icon: L.divIcon({ className: '', html: '<div class="venue-pin"></div>', iconSize: [20,20], iconAnchor: [10,10] })
@@ -1499,6 +1624,31 @@ bmore.get('/contact', (c) => {
 
 bmore.post('/contact', async (c) => {
   const body = await c.req.json()
+  const db = c.env.DB
+
+  try {
+    const col = await db.prepare(
+      "SELECT id FROM collections WHERE name = ? AND is_active = 1"
+    ).bind("contacts").first<{ id: string }>()
+
+    if (col) {
+      const id = crypto.randomUUID()
+      const now = Date.now()
+      await db.prepare(`
+        INSERT INTO content (id, collection_id, slug, title, data, status, author_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        id, col.id,
+        `contact-${id.slice(0, 8)}`,
+        `Contact: ${body.name || 'Anonymous'} - ${body.subject || 'General'}`,
+        JSON.stringify({ ...body, status: 'new' }),
+        'published', 'system', now, now
+      ).run()
+    }
+  } catch {
+    // Silently continue — still return success to the user
+  }
+
   return c.json({ success: true, message: 'Thank you! We\'ll get back to you within 24 hours.' })
 })
 
@@ -1628,7 +1778,7 @@ function renderContactPage() {
           const data = Object.fromEntries(formData)
 
           try {
-            const res = await fetch('/bmore/contact', {
+            const res = await fetch('/contact', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(data)
