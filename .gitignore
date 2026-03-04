@@ -3,3 +3,5 @@ node_modules/
 .dev.vars
 .mf/
 dist/
+src/collections/bookings.collection.ts
+src/collections/contacts.collection.ts

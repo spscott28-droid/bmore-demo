@@ -157,3 +157,155 @@ If picking up this work, the immediate next step is:
 1. Run the test checklist above (items 1-12)
 2. Fix any route conflicts or issues that surface
 3. If deploying to Cloudflare, replace the placeholder IDs in `wrangler.toml`
+
+---
+
+---
+
+# Session 2 State — March 4, 2026 (superseded by Session 3)
+
+See Session 3 below for current state.
+
+---
+
+# Session 3 State — March 4, 2026
+
+**From**: Cowork session (Windows)
+**To**: Next session
+
+## What Was Done This Session
+
+### 1. Port fix
+`npm run dev` now explicitly uses `--port 8787`. If 8787 is taken, it errors loudly instead of silently falling back to 8788. Kill port first if needed:
+```powershell
+for /f "tokens=5" %a in ('netstat -ano ^| findstr :8787') do taskkill /PID %a /F
+```
+
+### 2. System user bug fixed (admin role regression)
+**Root cause:** `ensureCollectionsSynced` in `src/index.ts` was inserting a system user into the `users` table on the first request. SonicJS uses `SELECT COUNT(*) FROM users` to determine if a registrant is the first user (who gets `admin` role). With the system user pre-inserted, all real users got `viewer` role.
+
+**Fix:** Removed system user INSERT from `ensureCollectionsSynced`. System user is now created on-demand in `routes.ts` via `getAuthorId(db)`, which prefers the first existing admin user's ID, only creating the system user as a last resort if no real admin exists yet.
+
+**For existing installs where Siata already has `viewer` role:**
+```powershell
+npx wrangler d1 execute DB --local --command "UPDATE users SET role='admin' WHERE email='spscott28@gmail.com'"
+```
+Then log out and back in at `/auth/login` to refresh the JWT.
+
+### 3. Seed route hardcoded UUID fixed
+`GET /seed` was using a hardcoded author UUID instead of `SYSTEM_USER_ID`. Fixed to use `getAuthorId(db)`.
+
+### 4. Pages wired to SonicJS Pages collection
+- Added `PageData` interface and `getPageFromDB(db, slug)` helper to `routes.ts`
+- Added `GET /seed-pages` route — creates 5 page entries (home, venues, about, contact, book) in the Pages collection with structured editable fields
+- All 5 route handlers now fetch their page from DB and pass it to render functions
+- All render functions accept `page: PageData | null` with hardcoded fallbacks
+- Pages are editable at `/admin/content` → filter by **Pages** model
+
+**To seed pages on a fresh install:** `GET /seed-pages`
+
+**Known issue:** SonicJS's Pages collection schema only shows `title`, `slug`, `meta_description`, `content` in the admin UI. Custom fields (`heroHeading`, `heroSubtext`, etc.) are stored in the `data` JSON blob but don't appear as separate editable fields in admin. Fix: extend the Pages collection schema in `src/collections/` to include all custom fields (not yet done).
+
+### 5. Forms wired to SonicJS form builder
+- Added `GET /seed-forms` route — creates two forms in the SonicJS `forms` table:
+  - **Contact Form** (`name: contact`) — name, email, subject, message
+  - **Venue Booking Wizard** (`name: venue-booking-wizard`) — all booking fields
+- Booking wizard submit now POSTs to `/forms/venue-booking-wizard/submit` (SonicJS endpoint)
+- Contact form submit now POSTs to `/forms/contact/submit` (SonicJS endpoint)
+- Submissions visible at `/admin/forms` → click form → Submissions tab
+- Removed old custom `POST /book` and `POST /contact` route handlers
+
+**To seed forms on a fresh install:** `GET /seed-forms`
+
+## Full Seed Checklist (fresh install order)
+1. `npm run dev`
+2. Visit `/auth/login` → register (first user gets admin)
+3. Visit `/seed` → seeds 10 venues
+4. Visit `/seed-pages` → seeds 5 CMS pages
+5. Visit `/seed-forms` → seeds 2 SonicJS forms
+6. Verify at `/admin/content` (venues + pages) and `/admin/forms` (contact + booking wizard)
+
+## Current Route Map
+
+| Route | Handler | Notes |
+|-------|---------|-------|
+| `GET /` | routes.ts | Fetches page from DB (slug: home) |
+| `GET /venues` | routes.ts | Fetches page from DB (slug: venues) |
+| `GET /venues/:slug` | routes.ts | Venue detail from DB |
+| `GET /book` | routes.ts | Fetches page from DB (slug: book) |
+| `GET /about` | routes.ts | Fetches page from DB (slug: about) |
+| `GET /contact` | routes.ts | Fetches page from DB (slug: contact) |
+| `GET /seed` | routes.ts | Seeds 10 venues (idempotent) |
+| `GET /seed-pages` | routes.ts | Seeds 5 CMS pages (idempotent) |
+| `GET /seed-forms` | routes.ts | Seeds 2 SonicJS forms (idempotent) |
+| `POST /forms/venue-booking-wizard/submit` | SonicJS | Booking wizard submission |
+| `POST /forms/contact/submit` | SonicJS | Contact form submission |
+| `GET /admin/*` | SonicJS | Admin panel |
+| `GET /auth/*` | SonicJS | Authentication |
+| `GET /api/*` | SonicJS | REST API |
+
+## Startup Warnings (Non-Blocking, Fine for Local Dev)
+```
+JWT_SECRET is not set — using hardcoded fallback. Fix: wrangler secret put JWT_SECRET
+CORS_ORIGINS is not set — cross-origin API requests will be rejected.
+```
+
+## Known Issues / Next Steps
+1. **Pages custom fields not visible in admin** — `heroHeading`, `heroSubtext`, etc. are stored in `data` JSON but the Pages collection schema doesn't define them, so admin only shows title/slug/content. Fix: add a custom pages collection in `src/collections/pages.collection.ts` with all the custom fields registered.
+2. **Remote deployment** — replace placeholder IDs in `wrangler.toml`, set secrets (`JWT_SECRET`, `CORS_ORIGINS`), run `npm run deploy:preview`
+3. **Booking wizard options** — event types, duration options, time slots still hardcoded in `routes.ts`. Future: pull from a CMS collection so they're admin-editable.
+
+---
+
+# Session 4 State — March 4, 2026
+
+**From**: Cowork session (context continuation)
+**To**: Next session
+
+## What Was Done
+
+### Pages Collection Schema — Full Implementation
+
+All five public pages now have comprehensive editable fields in the SonicJS admin panel.
+
+#### New file: `src/collections/pages.collection.ts`
+Custom `CollectionConfig` that overrides SonicJS's built-in minimal pages schema with ~60 named fields covering every editable content area across all pages:
+- **Common**: title, slug, meta_description, pageHeading, pageSubtext
+- **Home**: heroHeading, heroSubtext, heroCtaPrimary/Secondary, statVenues/Radius/Capacity/Price (+ labels), howItWorksHeading/Subtext, step1-3 Title/Text, featuredHeading/Subtext, ctaHeading/Subtext/ButtonPrimary/Secondary
+- **About**: missionHeading/Text, storyHeading/Text, valueFamilyFirst/Community/Transparent, neighborhoodHeading/Text, teamHeading/Subtext, team1-3 Name/Role/Bio, aboutCtaHeading/Subtext/BtnPrimary/Secondary
+- **Contact**: email, phone, hours, faqHeading, faqQ1-4, faqBookingAdvance/Cancellation/Tour/Catering
+
+#### Modified: `src/index.ts`
+- Added `import pagesCollection from './collections/pages.collection'`
+- Added `pagesCollection` to `registerCollections([...])`
+- `ensureCollectionsSynced` now **UPDATEs** the pages collection's schema on every Worker cold start (not just INSERT). This means changes to pages.collection.ts are immediately reflected in admin without manual DB migration.
+
+#### Modified: `src/bmore/routes.ts`
+- **PageData interface**: Expanded from 8 fields to ~60 fields matching the schema
+- **renderHomePage**: heroHeading, all 4 stats (+ labels), How It Works heading/subtext and all 3 step titles/texts, featuredHeading/Subtext, CTA heading/subtext/button
+- **renderAboutPage**: team member names/roles/bios, about CTA heading/subtext/buttons
+- **renderContactPage**: faqHeading, all 4 FAQ question labels (faqQ1-4)
+- **/seed-pages route**: Changed from INSERT-only to UPSERT (re-running refreshes all field data); all ~60 field values populated with proper defaults
+- Response message updated: `{ seeded, updated }` (was `{ seeded, skipped }`)
+
+## How To Activate in Admin
+
+After restarting the dev server, the pages schema auto-syncs on first request. Then:
+
+1. Visit `http://localhost:8787/` (triggers schema UPDATE in DB)
+2. Visit `http://localhost:8787/seed-pages` — refreshes all 5 page entries with full field data
+3. Visit `http://localhost:8787/admin/content?collection=pages` — you should now see ~60 fields per page
+
+## Key File Map (Updated)
+
+| File | What changed |
+|------|-------------|
+| `src/collections/pages.collection.ts` | **NEW** — ~60-field schema for all pages |
+| `src/index.ts` | Imports pagesCollection, registers it, UPDATEs schema in ensureCollectionsSynced |
+| `src/bmore/routes.ts` | PageData interface expanded; render functions wired to all new page fields; /seed-pages upserts with full data |
+
+## Remaining Work
+
+1. **Multi-page wizard form** — the booking form in `/admin/forms` is a flat form, not the 6-step wizard shown on the public site. Formio `wizard` panel layout needs to be configured.
+2. **Remote deployment** — replace placeholder IDs in `wrangler.toml`, set `JWT_SECRET` and `CORS_ORIGINS` secrets, run `npm run deploy:preview`
+3. **Booking wizard options from CMS** — event types, duration, time slots still hardcoded in `routes.ts`

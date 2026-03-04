@@ -11,9 +11,187 @@ import { bmoreLayout } from './layout'
 import { VENUES, EVENT_TYPES, VENUE_TYPE_LABELS, ALCOHOL_LABELS } from './venue-data'
 import type { VenueData } from './venue-data'
 
-// Must match SYSTEM_USER_ID in src/index.ts — the user created on startup to satisfy
-// the author_id FK constraint for public form submissions and seeded content.
+
+
 const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
+
+// Returns the ID to use as author_id for anonymous/system-generated content.
+// Prefers an existing admin user so the system user doesn't need to exist
+// (which would block SonicJS from assigning admin role to the first registrant).
+// Creates the system user on-demand only as a last resort.
+async function getAuthorId(db: D1Database): Promise<string> {
+  const admin = await db.prepare(
+    "SELECT id FROM users WHERE role = 'admin' LIMIT 1"
+  ).first<{ id: string }>()
+  if (admin) return admin.id
+
+  const sys = await db.prepare(
+    'SELECT id FROM users WHERE id = ?'
+  ).bind(SYSTEM_USER_ID).first<{ id: string }>()
+  if (sys) return SYSTEM_USER_ID
+
+  // Last resort: create system user now (only if no admin has registered yet)
+  const now = Date.now()
+  await db.prepare(
+    `INSERT OR IGNORE INTO users (id, email, username, first_name, last_name, role, is_active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(SYSTEM_USER_ID, 'system@bmore.local', 'system', 'System', 'User', 'viewer', 1, now, now).run()
+  return SYSTEM_USER_ID
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAGE DATA HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PageData {
+  // Identity
+  title?: string
+  slug?: string
+  meta_description?: string
+  // Shared header (all pages)
+  pageHeading?: string
+  pageSubtext?: string
+  // Home hero
+  heroHeading?: string
+  heroSubtext?: string
+  heroCtaPrimary?: string
+  heroCtaSecondary?: string
+  // Home stats bar
+  statVenues?: string
+  statVenuesLabel?: string
+  statRadius?: string
+  statRadiusLabel?: string
+  statCapacity?: string
+  statCapacityLabel?: string
+  statPrice?: string
+  statPriceLabel?: string
+  // Home How It Works
+  howItWorksHeading?: string
+  howItWorksSubtext?: string
+  step1Title?: string
+  step1Text?: string
+  step2Title?: string
+  step2Text?: string
+  step3Title?: string
+  step3Text?: string
+  // Home Featured Venues
+  featuredHeading?: string
+  featuredSubtext?: string
+  // Home CTA section
+  ctaHeading?: string
+  ctaSubtext?: string
+  ctaButtonPrimary?: string
+  ctaButtonSecondary?: string
+  // About: mission & story
+  missionHeading?: string
+  missionText?: string
+  storyHeading?: string
+  storyText?: string
+  // About: values
+  valueFamilyFirst?: string
+  valueCommunity?: string
+  valueTransparent?: string
+  // About: neighborhood
+  neighborhoodHeading?: string
+  neighborhoodText?: string
+  // About: team
+  teamHeading?: string
+  teamSubtext?: string
+  team1Name?: string
+  team1Role?: string
+  team1Bio?: string
+  team2Name?: string
+  team2Role?: string
+  team2Bio?: string
+  team3Name?: string
+  team3Role?: string
+  team3Bio?: string
+  // About: CTA banner
+  aboutCtaHeading?: string
+  aboutCtaSubtext?: string
+  aboutCtaBtnPrimary?: string
+  aboutCtaBtnSecondary?: string
+  // Contact info
+  email?: string
+  phone?: string
+  hours?: string
+  // Contact FAQ
+  faqHeading?: string
+  faqQ1?: string
+  faqBookingAdvance?: string
+  faqQ2?: string
+  faqCancellation?: string
+  faqQ3?: string
+  faqTour?: string
+  faqQ4?: string
+  faqCatering?: string
+  // Catch-all for any extra fields
+  content?: string
+  [key: string]: unknown
+}
+
+async function getPageFromDB(db: D1Database, slug: string): Promise<PageData | null> {
+  try {
+    const col = await db.prepare(
+      "SELECT id FROM collections WHERE name = 'pages' AND is_active = 1"
+    ).first<{ id: string }>()
+    if (!col) return null
+
+    const row = await db.prepare(
+      "SELECT data FROM content WHERE collection_id = ? AND slug = ? AND status = 'published' LIMIT 1"
+    ).bind(col.id, slug).first()
+    if (!row) return null
+
+    return JSON.parse(row.data as string) as PageData
+  } catch {
+    return null
+  }
+}
+
+// Turnstile site key (public key, safe to embed in HTML)
+interface TurnstileConfig {
+  enabled: boolean
+  siteKey: string
+  theme: 'light' | 'dark' | 'auto'
+  size: 'normal' | 'compact'
+  mode: 'managed' | 'non-interactive' | 'invisible'
+  appearance: 'always' | 'execute' | 'interaction-only'
+}
+
+// Reads Turnstile plugin settings from DB.
+// Returns null when the plugin is disabled or not configured.
+async function getTurnstileConfig(db: D1Database): Promise<TurnstileConfig | null> {
+  try {
+    const plugin = await db.prepare(
+      "SELECT settings FROM plugins WHERE id = 'turnstile' LIMIT 1"
+    ).first()
+    if (!plugin?.settings) return null
+    const s = JSON.parse(plugin.settings as string) as Partial<TurnstileConfig>
+    if (!s.enabled || !s.siteKey) return null
+    return {
+      enabled: true,
+      siteKey: s.siteKey,
+      theme: s.theme ?? 'auto',
+      size: s.size ?? 'normal',
+      mode: s.mode ?? 'managed',
+      appearance: s.appearance ?? 'always',
+    }
+  } catch {
+    return null
+  }
+}
+
+// Build the cf-turnstile widget HTML from config.
+// Invisible mode: renders a hidden div; execution is triggered on form submit via JS.
+function turnstileWidget(cfg: TurnstileConfig, id?: string): string {
+  const idAttr = id ? ` id="${id}"` : ''
+  if (cfg.mode === 'invisible') {
+    return `<div${idAttr} class="cf-turnstile" data-sitekey="${cfg.siteKey}" data-size="invisible"></div>`
+  }
+  const sizeAttr = cfg.size === 'compact' ? ' data-size="compact"' : ''
+  const appearAttr = cfg.appearance !== 'always' ? ` data-appearance="${cfg.appearance}"` : ''
+  return `<div${idAttr} class="cf-turnstile" data-sitekey="${cfg.siteKey}" data-theme="${cfg.theme}"${sizeAttr}${appearAttr}></div>`
+}
 
 const bmore = new Hono()
 
@@ -41,7 +219,7 @@ async function getVenuesFromDB(db: D1Database): Promise<VenueData[]> {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           crypto.randomUUID(), col.id, venue.slug, venue.title,
-          JSON.stringify(venue), 'published', SYSTEM_USER_ID, now, now
+          JSON.stringify(venue), 'published', await getAuthorId(db), now, now
         ).run()
       }
       return VENUES
@@ -107,11 +285,179 @@ bmore.get('/seed', async (c) => {
     await db.prepare(`
       INSERT INTO content (id, collection_id, slug, title, data, status, author_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(id, col.id, venue.slug, venue.title, JSON.stringify(venue), 'published', '6b27b79e-9936-47a7-936e-7ec8aab43ac9', now, now).run()
+    `).bind(id, col.id, venue.slug, venue.title, JSON.stringify(venue), 'published', await getAuthorId(db), now, now).run()
   }
 
   return c.json({ success: true, message: `Seeded ${VENUES.length} venues` })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEED PAGES ROUTE
+// ─────────────────────────────────────────────────────────────────────────────
+
+bmore.get('/seed-pages', async (c) => {
+  const db = c.env.DB
+  const authorId = await getAuthorId(db)
+
+  const col = await db.prepare(
+    "SELECT id FROM collections WHERE name = 'pages' AND is_active = 1"
+  ).first<{ id: string }>()
+
+  if (!col) return c.json({ error: 'Pages collection not found. Visit /admin first.' }, 500)
+
+  const pages = [
+    {
+      slug: 'home',
+      title: 'Home',
+      data: {
+        // Hero
+        heroHeading: "Your Family's Perfect Space Awaits in Baltimore",
+        heroSubtext: "Book beautiful churches, recreation centers, and community spaces for your next celebration \u2014 all within 5 miles of Patterson Park.",
+        heroCtaPrimary: "Book a Space",
+        heroCtaSecondary: "Browse Venues",
+        // Stats bar
+        statVenues: "10+",
+        statVenuesLabel: "Vetted Venues",
+        statRadius: "5 mi",
+        statRadiusLabel: "Patterson Park Radius",
+        statCapacity: "250",
+        statCapacityLabel: "Max Capacity",
+        statPrice: "$35",
+        statPriceLabel: "Starting Per Hour",
+        // How It Works
+        howItWorksHeading: "How It Works",
+        howItWorksSubtext: "Book your perfect family space in three easy steps",
+        step1Title: "1. Tell Us Your Needs",
+        step1Text: "Share your event details \u2014 guest count, kitchen needs, duration, and more. We'll match you with the perfect spaces.",
+        step2Title: "2. Choose Your Venue",
+        step2Text: "Browse available spaces on a map, compare amenities and pricing, and select the one that fits your family best.",
+        step3Title: "3. Book & Celebrate",
+        step3Text: "Pick your date and time, confirm your booking, and get ready for an amazing family gathering!",
+        // Featured Venues
+        featuredHeading: "Featured Venues",
+        featuredSubtext: "Hand-picked spaces perfect for your next family event",
+        // CTA section
+        ctaHeading: "Ready to Plan Your Event?",
+        ctaSubtext: "Our booking wizard makes it easy to find and reserve the perfect space for your family gathering.",
+        ctaButtonPrimary: "Start Booking Now",
+        ctaButtonSecondary: "Browse All Venues",
+        // SEO
+        meta_description: "Book family-friendly event spaces in Baltimore \u2014 churches, recreation centers, and community spaces near Patterson Park.",
+      }
+    },
+    {
+      slug: 'venues',
+      title: 'Browse Venues',
+      data: {
+        pageHeading: "Find Your Perfect Venue",
+        pageSubtext: "Browse our curated selection of family-friendly spaces across Baltimore's Patterson Park neighborhoods.",
+        meta_description: "Browse family-friendly venues near Patterson Park in Baltimore. Churches, rec centers, and community spaces available to book.",
+      }
+    },
+    {
+      slug: 'about',
+      title: 'About Us',
+      data: {
+        pageHeading: "Building Community, One Celebration at a Time",
+        pageSubtext: "We believe every family deserves a beautiful, affordable space to gather and celebrate.",
+        // Mission & Story
+        missionHeading: "Our Mission",
+        missionText: "Family Fun in Bmore exists to make it easy for Baltimore families to find, book, and enjoy community spaces for their gatherings and celebrations. We curate only the best family-friendly venues within the Patterson Park corridor \u2014 churches, recreation centers, schools, and community organizations that open their doors to the community.",
+        storyHeading: "Our Story",
+        storyText: "Family Fun in Bmore was born from a simple frustration: finding a good space for a family event in Baltimore shouldn't require weeks of phone calls and uncertainty. We set out to change that by creating a simple, transparent booking platform focused on Southeast Baltimore's incredible community spaces.",
+        // Values
+        valueFamilyFirst: "Every space we list is evaluated for family-friendliness, safety, and comfort. Your family's experience is our top priority.",
+        valueCommunity: "We work directly with local churches, schools, and community organizations. Your rental helps support these vital neighborhood institutions.",
+        valueTransparent: "No hidden fees, no surprise charges. See exactly what you get and what it costs before you book. Simple as that.",
+        // Neighborhood
+        neighborhoodHeading: "The Patterson Park Neighborhood",
+        neighborhoodText: "Patterson Park is the heart of Southeast Baltimore \u2014 a 155-acre urban oasis surrounded by vibrant neighborhoods including Highlandtown, Canton, Fells Point, and Butchers Hill.",
+        // Team
+        teamHeading: "Built by Baltimoreans",
+        teamSubtext: "We're a small team of Baltimore residents who believe in the power of community spaces to bring families together.",
+        team1Name: "Aisha Johnson",
+        team1Role: "Founder & CEO",
+        team1Bio: "Patterson Park resident, mother of three",
+        team2Name: "Mike Rodriguez",
+        team2Role: "Venue Partnerships",
+        team2Bio: "Canton native, community organizer",
+        team3Name: "Priya Patel",
+        team3Role: "Operations",
+        team3Bio: "Highlandtown, event planner",
+        // CTA banner
+        aboutCtaHeading: "Ready to Find Your Space?",
+        aboutCtaSubtext: "Browse our curated collection of family-friendly venues near Patterson Park.",
+        aboutCtaBtnPrimary: "Browse Venues",
+        aboutCtaBtnSecondary: "Get in Touch",
+        // SEO
+        meta_description: "About Family Fun in Bmore \u2014 connecting Baltimore families with community spaces for celebrations near Patterson Park.",
+      }
+    },
+    {
+      slug: 'contact',
+      title: 'Contact Us',
+      data: {
+        pageHeading: "Get in Touch",
+        pageSubtext: "Have a question about a venue or need help planning your event? We'd love to hear from you.",
+        // Contact info
+        email: "hello@familyfuninbmore.com",
+        phone: "(410) 555-FUN1",
+        hours: "Mon-Fri: 9am - 6pm | Sat: 10am - 4pm | Sun: Closed",
+        // FAQ
+        faqHeading: "Frequently Asked Questions",
+        faqQ1: "How far in advance should I book?",
+        faqBookingAdvance: "We recommend booking at least 2 weeks ahead. Popular dates (holidays, summer weekends) should be booked 4-6 weeks in advance.",
+        faqQ2: "Is there a cancellation policy?",
+        faqCancellation: "Free cancellation up to 48 hours before your event. After that, a 50% fee applies.",
+        faqQ3: "Can I tour a venue before booking?",
+        faqTour: "Absolutely! Contact us and we'll arrange a visit with the venue coordinator.",
+        faqQ4: "Do you handle catering?",
+        faqCatering: "We don't provide catering directly, but many of our venues have kitchen facilities and we can recommend local caterers.",
+        // SEO
+        meta_description: "Contact Family Fun in Bmore \u2014 reach us with venue questions, booking help, or partnership inquiries.",
+      }
+    },
+    {
+      slug: 'book',
+      title: 'Book a Space',
+      data: {
+        pageHeading: "Book Your Space",
+        pageSubtext: "Tell us about your event and we'll find the perfect venue",
+        meta_description: "Book a family-friendly event space near Patterson Park in Baltimore. 6-step booking wizard.",
+      }
+    },
+  ]
+
+  let seeded = 0
+  let skipped = 0
+  const now = Date.now()
+
+  for (const page of pages) {
+    const existing = await db.prepare(
+      "SELECT id FROM content WHERE collection_id = ? AND slug = ?"
+    ).bind(col.id, page.slug).first()
+
+    if (existing) {
+      // Update existing page so re-running /seed-pages refreshes all content
+      await db.prepare(
+        `UPDATE content SET title = ?, data = ?, updated_at = ? WHERE collection_id = ? AND slug = ?`
+      ).bind(page.title, JSON.stringify(page.data), now, col.id, page.slug).run()
+      skipped++
+    } else {
+      await db.prepare(
+        `INSERT INTO content (id, collection_id, slug, title, data, status, author_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        crypto.randomUUID(), col.id, page.slug, page.title,
+        JSON.stringify(page.data), 'published', authorId, now, now
+      ).run()
+      seeded++
+    }
+  }
+
+  return c.json({ success: true, seeded, updated: skipped, message: `Pages synced: ${seeded} new, ${skipped} updated` })
+})
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HOME PAGE
@@ -121,10 +467,11 @@ bmore.get('/', async (c) => {
   let venues = await getVenuesFromDB(c.env.DB)
   if (venues.length === 0) venues = VENUES
   const featured = venues.slice(0, 6)
-  return c.html(bmoreLayout('Home', renderHomePage(featured, venues), { activeNav: 'home' }))
+  const page = await getPageFromDB(c.env.DB, 'home')
+  return c.html(bmoreLayout(page?.pageHeading ? page.pageHeading : 'Home', renderHomePage(featured, venues, page), { activeNav: 'home' }))
 })
 
-function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES) {
+function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES, page: PageData | null = null) {
   return html`
     <!-- Hero Section -->
     <section class="relative overflow-hidden">
@@ -133,21 +480,18 @@ function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES) 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
             <div class="text-white">
               <h1 class="font-display text-4xl md:text-5xl lg:text-6xl font-bold leading-tight mb-6">
-                Your Family's<br>
-                <span class="text-orange-200">Perfect Space</span><br>
-                Awaits in Baltimore
+                ${page?.heroHeading ?? 'Your Family\'s Perfect Space Awaits in Baltimore'}
               </h1>
               <p class="text-orange-100 text-lg md:text-xl mb-8 leading-relaxed">
-                Book beautiful churches, recreation centers, and community spaces
-                for your next celebration — all within 5 miles of Patterson Park.
+                ${page?.heroSubtext ?? 'Book beautiful churches, recreation centers, and community spaces for your next celebration — all within 5 miles of Patterson Park.'}
               </p>
               <div class="flex flex-col sm:flex-row gap-4">
                 <a href="/book" class="inline-flex items-center justify-center px-8 py-4 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors shadow-lg text-lg">
-                  Book a Space
+                  ${page?.heroCtaPrimary ?? 'Book a Space'}
                   <svg class="w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
                 </a>
                 <a href="/venues" class="inline-flex items-center justify-center px-8 py-4 border-2 border-white/30 text-white font-semibold rounded-xl hover:bg-white/10 transition-colors text-lg">
-                  Browse Venues
+                  ${page?.heroCtaSecondary ?? 'Browse Venues'}
                 </a>
               </div>
             </div>
@@ -175,20 +519,20 @@ function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES) 
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div class="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
           <div>
-            <p class="font-display text-3xl font-bold text-orange-500">10+</p>
-            <p class="text-gray-500 text-sm mt-1">Vetted Venues</p>
+            <p class="font-display text-3xl font-bold text-orange-500">${page?.statVenues ?? '10+'}</p>
+            <p class="text-gray-500 text-sm mt-1">${page?.statVenuesLabel ?? 'Vetted Venues'}</p>
           </div>
           <div>
-            <p class="font-display text-3xl font-bold text-teal-600">5 mi</p>
-            <p class="text-gray-500 text-sm mt-1">Patterson Park Radius</p>
+            <p class="font-display text-3xl font-bold text-teal-600">${page?.statRadius ?? '5 mi'}</p>
+            <p class="text-gray-500 text-sm mt-1">${page?.statRadiusLabel ?? 'Patterson Park Radius'}</p>
           </div>
           <div>
-            <p class="font-display text-3xl font-bold text-orange-500">250</p>
-            <p class="text-gray-500 text-sm mt-1">Max Capacity</p>
+            <p class="font-display text-3xl font-bold text-orange-500">${page?.statCapacity ?? '250'}</p>
+            <p class="text-gray-500 text-sm mt-1">${page?.statCapacityLabel ?? 'Max Capacity'}</p>
           </div>
           <div>
-            <p class="font-display text-3xl font-bold text-teal-600">$35</p>
-            <p class="text-gray-500 text-sm mt-1">Starting Per Hour</p>
+            <p class="font-display text-3xl font-bold text-teal-600">${page?.statPrice ?? '$35'}</p>
+            <p class="text-gray-500 text-sm mt-1">${page?.statPriceLabel ?? 'Starting Per Hour'}</p>
           </div>
         </div>
       </div>
@@ -198,30 +542,30 @@ function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES) 
     <section class="py-16 bg-white">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="text-center mb-12">
-          <h2 class="font-display text-3xl font-bold text-gray-900 mb-4">How It Works</h2>
-          <p class="text-gray-500 text-lg max-w-2xl mx-auto">Book your perfect family space in three easy steps</p>
+          <h2 class="font-display text-3xl font-bold text-gray-900 mb-4">${page?.howItWorksHeading ?? 'How It Works'}</h2>
+          <p class="text-gray-500 text-lg max-w-2xl mx-auto">${page?.howItWorksSubtext ?? 'Book your perfect family space in three easy steps'}</p>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
           <div class="text-center p-6">
             <div class="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <span class="text-3xl">📝</span>
             </div>
-            <h3 class="font-semibold text-lg text-gray-900 mb-2">1. Tell Us Your Needs</h3>
-            <p class="text-gray-500">Share your event details — guest count, kitchen needs, duration, and more. We'll match you with the perfect spaces.</p>
+            <h3 class="font-semibold text-lg text-gray-900 mb-2">${page?.step1Title ?? '1. Tell Us Your Needs'}</h3>
+            <p class="text-gray-500">${page?.step1Text ?? 'Share your event details — guest count, kitchen needs, duration, and more. We\'ll match you with the perfect spaces.'}</p>
           </div>
           <div class="text-center p-6">
             <div class="w-16 h-16 bg-teal-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <span class="text-3xl">🗺️</span>
             </div>
-            <h3 class="font-semibold text-lg text-gray-900 mb-2">2. Choose Your Venue</h3>
-            <p class="text-gray-500">Browse available spaces on a map, compare amenities and pricing, and select the one that fits your family best.</p>
+            <h3 class="font-semibold text-lg text-gray-900 mb-2">${page?.step2Title ?? '2. Choose Your Venue'}</h3>
+            <p class="text-gray-500">${page?.step2Text ?? 'Browse available spaces on a map, compare amenities and pricing, and select the one that fits your family best.'}</p>
           </div>
           <div class="text-center p-6">
             <div class="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <span class="text-3xl">🎉</span>
             </div>
-            <h3 class="font-semibold text-lg text-gray-900 mb-2">3. Book & Celebrate</h3>
-            <p class="text-gray-500">Pick your date and time, confirm your booking, and get ready for an amazing family gathering!</p>
+            <h3 class="font-semibold text-lg text-gray-900 mb-2">${page?.step3Title ?? '3. Book & Celebrate'}</h3>
+            <p class="text-gray-500">${page?.step3Text ?? 'Pick your date and time, confirm your booking, and get ready for an amazing family gathering!'}</p>
           </div>
         </div>
       </div>
@@ -232,8 +576,8 @@ function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES) 
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex items-center justify-between mb-8">
           <div>
-            <h2 class="font-display text-3xl font-bold text-gray-900 mb-2">Featured Venues</h2>
-            <p class="text-gray-500">Hand-picked spaces perfect for your next family event</p>
+            <h2 class="font-display text-3xl font-bold text-gray-900 mb-2">${page?.featuredHeading ?? 'Featured Venues'}</h2>
+            <p class="text-gray-500">${page?.featuredSubtext ?? 'Hand-picked spaces perfect for your next family event'}</p>
           </div>
           <a href="/venues" class="hidden sm:inline-flex items-center text-orange-500 font-semibold hover:text-orange-600">
             View All
@@ -294,10 +638,10 @@ function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES) 
     <!-- CTA -->
     <section class="py-16 hero-gradient">
       <div class="max-w-4xl mx-auto px-4 text-center text-white">
-        <h2 class="font-display text-3xl md:text-4xl font-bold mb-4">Ready to Plan Your Event?</h2>
-        <p class="text-orange-100 text-lg mb-8 max-w-2xl mx-auto">Our booking wizard makes it easy to find and reserve the perfect space for your family gathering.</p>
+        <h2 class="font-display text-3xl md:text-4xl font-bold mb-4">${page?.ctaHeading ?? 'Ready to Plan Your Event?'}</h2>
+        <p class="text-orange-100 text-lg mb-8 max-w-2xl mx-auto">${page?.ctaSubtext ?? 'Our booking wizard makes it easy to find and reserve the perfect space for your family gathering.'}</p>
         <a href="/book" class="inline-flex items-center px-8 py-4 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors shadow-lg text-lg">
-          Start Booking Now
+          ${page?.ctaButtonPrimary ?? 'Start Booking Now'}
         </a>
       </div>
     </section>
@@ -379,10 +723,11 @@ bmore.get('/venues', async (c) => {
   if (allVenues.length === 0) allVenues = VENUES
   const typeFilter = c.req.query('type') || ''
   const venues = typeFilter ? allVenues.filter(v => v.venueType === typeFilter) : allVenues
-  return c.html(bmoreLayout('Venues', renderVenuesPage(venues, typeFilter, allVenues), { activeNav: 'venues' }))
+  const page = await getPageFromDB(c.env.DB, 'venues')
+  return c.html(bmoreLayout(page?.pageHeading ? page.pageHeading : 'Venues', renderVenuesPage(venues, typeFilter, allVenues, page), { activeNav: 'venues' }))
 })
 
-function renderVenuesPage(venues: VenueData[], typeFilter: string, allVenuesForMap: VenueData[] = VENUES) {
+function renderVenuesPage(venues: VenueData[], typeFilter: string, allVenuesForMap: VenueData[] = VENUES, page: PageData | null = null) {
   const types = [
     { value: '', label: 'All Venues' },
     { value: 'church', label: 'Church Halls' },
@@ -396,8 +741,8 @@ function renderVenuesPage(venues: VenueData[], typeFilter: string, allVenuesForM
     <!-- Header -->
     <section class="bg-white border-b">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <h1 class="font-display text-3xl font-bold text-gray-900 mb-2">Browse Venues</h1>
-        <p class="text-gray-500 text-lg">Find the perfect family-friendly space near Patterson Park</p>
+        <h1 class="font-display text-3xl font-bold text-gray-900 mb-2">${page?.pageHeading ?? 'Browse Venues'}</h1>
+        <p class="text-gray-500 text-lg">${page?.pageSubtext ?? 'Find the perfect family-friendly space near Patterson Park'}</p>
 
         <!-- Filters -->
         <div class="flex flex-wrap gap-2 mt-6">
@@ -681,46 +1026,21 @@ bmore.get('/book', async (c) => {
   const preselectedEventType = c.req.query('eventType') || ''
   let venues = await getVenuesFromDB(c.env.DB)
   if (venues.length === 0) venues = VENUES
-  return c.html(bmoreLayout('Book a Space', renderBookingPage(preselectedVenue, preselectedEventType, venues), { activeNav: 'book' }))
+  const page = await getPageFromDB(c.env.DB, 'book')
+  const turnstileCfg = await getTurnstileConfig(c.env.DB)
+  return c.html(bmoreLayout(page?.pageHeading ? page.pageHeading : 'Book a Space', renderBookingPage(preselectedVenue, preselectedEventType, venues, page, turnstileCfg), { activeNav: 'book' }))
 })
 
-bmore.post('/book', async (c) => {
-  const body = await c.req.json()
-  const db = c.env.DB
 
-  const col = await db.prepare(
-    "SELECT id FROM collections WHERE name = ? AND is_active = 1"
-  ).bind("bookings").first<{ id: string }>()
-
-  if (!col) return c.json({ error: 'Bookings collection not found' }, 500)
-
-  const id = crypto.randomUUID()
-  const now = Date.now()
-  const bookingRef = 'BK-' + now
-
-  await db.prepare(`
-    INSERT INTO content (id, collection_id, slug, title, data, status, author_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    id, col.id,
-    `booking-${id.slice(0, 8)}`,
-    `${body.eventName || 'Booking'} - ${body.contactName || 'Guest'}`,
-    JSON.stringify({ ...body, bookingRef, status: 'pending' }),
-    'published', SYSTEM_USER_ID, now, now
-  ).run()
-
-  return c.json({ success: true, bookingId: bookingRef, message: 'Booking request received! We will confirm within 24 hours.' })
-})
-
-function renderBookingPage(preselectedVenue: string, preselectedEventType: string, venues: VenueData[] = VENUES) {
+function renderBookingPage(preselectedVenue: string, preselectedEventType: string, venues: VenueData[] = VENUES, page: PageData | null = null, turnstileCfg: TurnstileConfig | null = null) {
   const venueData = preselectedVenue ? venues.find(v => v.slug === preselectedVenue) : null
 
   return html`
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <!-- Header -->
       <div class="text-center mb-8">
-        <h1 class="font-display text-3xl font-bold text-gray-900 mb-2">Book Your Space</h1>
-        <p class="text-gray-500 text-lg">Tell us about your event and we'll find the perfect venue</p>
+        <h1 class="font-display text-3xl font-bold text-gray-900 mb-2">${page?.pageHeading ?? 'Book Your Space'}</h1>
+        <p class="text-gray-500 text-lg">${page?.pageSubtext ?? 'Tell us about your event and we\'ll find the perfect venue'}</p>
       </div>
 
       <!-- Progress Steps -->
@@ -1039,6 +1359,7 @@ function renderBookingPage(preselectedVenue: string, preselectedEventType: strin
               <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
               Back
             </button>
+            ${raw(turnstileCfg ? turnstileWidget(turnstileCfg, 'booking-turnstile') : '')}
             <button onclick="submitBooking()" id="btn-submit" class="px-8 py-3 bg-teal-600 text-white font-semibold rounded-xl hover:bg-teal-700 transition-colors disabled:opacity-50" disabled>
               Confirm Booking Request
             </button>
@@ -1392,10 +1713,14 @@ function renderBookingPage(preselectedVenue: string, preselectedEventType: strin
         }
 
         try {
-          const res = await fetch('/book', {
+          // Include Turnstile token if widget is present
+          const tsToken = document.querySelector('#booking-turnstile [name="cf-turnstile-response"]')?.value
+          if (tsToken) booking.turnstile = tsToken
+
+          const res = await fetch('/forms/venue-booking-wizard/submit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(booking)
+            body: JSON.stringify({ data: booking })
           })
           const data = await res.json()
 
@@ -1406,7 +1731,7 @@ function renderBookingPage(preselectedVenue: string, preselectedEventType: strin
           confirm.classList.add('active')
 
           document.getElementById('confirm-details').innerHTML =
-            '<p class="text-sm"><strong>Booking ID:</strong> ' + (data.bookingId || 'N/A') + '</p>' +
+            '<p class="text-sm"><strong>Booking ID:</strong> ' + (data.submissionId ? data.submissionId.slice(0,8).toUpperCase() : 'N/A') + '</p>' +
             '<p class="text-sm mt-1"><strong>Event:</strong> ' + booking.eventName + '</p>' +
             '<p class="text-sm mt-1"><strong>Venue:</strong> ' + booking.venueName + '</p>' +
             '<p class="text-sm mt-1"><strong>Date:</strong> ' + booking.eventDate + ' at ' + booking.startTime + '</p>' +
@@ -1435,6 +1760,7 @@ function renderBookingPage(preselectedVenue: string, preselectedEventType: strin
         }
       })
     </script>
+    ${raw(turnstileCfg ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : '')}
   `
 }
 
@@ -1445,20 +1771,20 @@ function renderBookingPage(preselectedVenue: string, preselectedEventType: strin
 bmore.get('/about', async (c) => {
   let venues = await getVenuesFromDB(c.env.DB)
   if (venues.length === 0) venues = VENUES
-  return c.html(bmoreLayout('About', renderAboutPage(venues), { activeNav: 'about' }))
+  const page = await getPageFromDB(c.env.DB, 'about')
+  return c.html(bmoreLayout(page?.pageHeading ? page.pageHeading : 'About', renderAboutPage(venues, page), { activeNav: 'about' }))
 })
 
-function renderAboutPage(allVenues: VenueData[] = VENUES) {
+function renderAboutPage(allVenues: VenueData[] = VENUES, page: PageData | null = null) {
   return html`
     <!-- Hero -->
     <section class="bg-white">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
           <div>
-            <h1 class="font-display text-4xl font-bold text-gray-900 mb-6">Bringing Families Together in Baltimore</h1>
+            <h1 class="font-display text-4xl font-bold text-gray-900 mb-6">${page?.pageHeading ?? 'Bringing Families Together in Baltimore'}</h1>
             <p class="text-gray-600 text-lg leading-relaxed mb-6">
-              Family Fun in Bmore was born from a simple idea: Baltimore's churches, rec centers, and community spaces
-              are amazing gathering places — but finding and booking them shouldn't be hard.
+              ${page?.pageSubtext ?? 'Family Fun in Bmore was born from a simple idea: Baltimore\'s churches, rec centers, and community spaces are amazing gathering places — but finding and booking them shouldn\'t be hard.'}
             </p>
             <p class="text-gray-600 leading-relaxed mb-6">
               We partner with venues within 5 miles of Patterson Park to make it easy for families to find, compare,
@@ -1486,21 +1812,21 @@ function renderAboutPage(allVenues: VenueData[] = VENUES) {
               <span class="text-3xl">👨‍👩‍👧‍👦</span>
             </div>
             <h3 class="font-semibold text-lg text-gray-900 mb-3">Family First</h3>
-            <p class="text-gray-500">Every space we list is evaluated for family-friendliness, safety, and comfort. Your family's experience is our top priority.</p>
+            <p class="text-gray-500">${page?.valueFamilyFirst ?? 'Every space we list is evaluated for family-friendliness, safety, and comfort. Your family\'s experience is our top priority.'}</p>
           </div>
           <div class="bg-white rounded-xl p-8 shadow-sm text-center">
             <div class="w-16 h-16 bg-teal-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <span class="text-3xl">🤝</span>
             </div>
             <h3 class="font-semibold text-lg text-gray-900 mb-3">Community Powered</h3>
-            <p class="text-gray-500">We work directly with local churches, schools, and community organizations. Your rental helps support these vital neighborhood institutions.</p>
+            <p class="text-gray-500">${page?.valueCommunity ?? 'We work directly with local churches, schools, and community organizations. Your rental helps support these vital neighborhood institutions.'}</p>
           </div>
           <div class="bg-white rounded-xl p-8 shadow-sm text-center">
             <div class="w-16 h-16 bg-amber-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <span class="text-3xl">💡</span>
             </div>
             <h3 class="font-semibold text-lg text-gray-900 mb-3">Easy & Transparent</h3>
-            <p class="text-gray-500">No hidden fees, no surprise charges. See exactly what you get and what it costs before you book. Simple as that.</p>
+            <p class="text-gray-500">${page?.valueTransparent ?? 'No hidden fees, no surprise charges. See exactly what you get and what it costs before you book. Simple as that.'}</p>
           </div>
         </div>
       </div>
@@ -1514,10 +1840,9 @@ function renderAboutPage(allVenues: VenueData[] = VENUES) {
             <div id="about-map" style="height:350px;width:100%;border-radius:16px;overflow:hidden;"></div>
           </div>
           <div>
-            <h2 class="font-display text-3xl font-bold text-gray-900 mb-6">The Patterson Park Neighborhood</h2>
+            <h2 class="font-display text-3xl font-bold text-gray-900 mb-6">${page?.neighborhoodHeading ?? 'The Patterson Park Neighborhood'}</h2>
             <p class="text-gray-600 leading-relaxed mb-4">
-              Patterson Park is the heart of Southeast Baltimore — a 155-acre urban oasis surrounded by vibrant
-              neighborhoods including Highlandtown, Canton, Fells Point, and Butchers Hill.
+              ${page?.neighborhoodText ?? 'Patterson Park is the heart of Southeast Baltimore — a 155-acre urban oasis surrounded by vibrant neighborhoods including Highlandtown, Canton, Fells Point, and Butchers Hill.'}
             </p>
             <p class="text-gray-600 leading-relaxed mb-4">
               The area is home to a rich tapestry of cultures, with strong community ties and a tradition of
@@ -1554,26 +1879,26 @@ function renderAboutPage(allVenues: VenueData[] = VENUES) {
     <!-- Team -->
     <section class="py-16 bg-gray-50">
       <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-        <h2 class="font-display text-3xl font-bold text-gray-900 mb-4">Built by Baltimoreans</h2>
-        <p class="text-gray-500 text-lg mb-8">We're a small team of Baltimore residents who believe in the power of community spaces to bring families together.</p>
+        <h2 class="font-display text-3xl font-bold text-gray-900 mb-4">${page?.teamHeading ?? 'Built by Baltimoreans'}</h2>
+        <p class="text-gray-500 text-lg mb-8">${page?.teamSubtext ?? 'We\'re a small team of Baltimore residents who believe in the power of community spaces to bring families together.'}</p>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div class="bg-white rounded-xl p-6 shadow-sm">
             <div class="w-20 h-20 bg-orange-100 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl">👩🏾</div>
-            <h4 class="font-semibold text-gray-900">Aisha Johnson</h4>
-            <p class="text-gray-500 text-sm">Founder & CEO</p>
-            <p class="text-gray-400 text-xs mt-2">Patterson Park resident, mother of three</p>
+            <h4 class="font-semibold text-gray-900">${page?.team1Name ?? 'Aisha Johnson'}</h4>
+            <p class="text-gray-500 text-sm">${page?.team1Role ?? 'Founder & CEO'}</p>
+            <p class="text-gray-400 text-xs mt-2">${page?.team1Bio ?? 'Patterson Park resident, mother of three'}</p>
           </div>
           <div class="bg-white rounded-xl p-6 shadow-sm">
             <div class="w-20 h-20 bg-teal-100 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl">👨🏻</div>
-            <h4 class="font-semibold text-gray-900">Mike Rodriguez</h4>
-            <p class="text-gray-500 text-sm">Venue Partnerships</p>
-            <p class="text-gray-400 text-xs mt-2">Canton native, community organizer</p>
+            <h4 class="font-semibold text-gray-900">${page?.team2Name ?? 'Mike Rodriguez'}</h4>
+            <p class="text-gray-500 text-sm">${page?.team2Role ?? 'Venue Partnerships'}</p>
+            <p class="text-gray-400 text-xs mt-2">${page?.team2Bio ?? 'Canton native, community organizer'}</p>
           </div>
           <div class="bg-white rounded-xl p-6 shadow-sm">
             <div class="w-20 h-20 bg-amber-100 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl">👩🏽</div>
-            <h4 class="font-semibold text-gray-900">Priya Patel</h4>
-            <p class="text-gray-500 text-sm">Operations</p>
-            <p class="text-gray-400 text-xs mt-2">Highlandtown, event planner</p>
+            <h4 class="font-semibold text-gray-900">${page?.team3Name ?? 'Priya Patel'}</h4>
+            <p class="text-gray-500 text-sm">${page?.team3Role ?? 'Operations'}</p>
+            <p class="text-gray-400 text-xs mt-2">${page?.team3Bio ?? 'Highlandtown, event planner'}</p>
           </div>
         </div>
       </div>
@@ -1582,11 +1907,11 @@ function renderAboutPage(allVenues: VenueData[] = VENUES) {
     <!-- CTA -->
     <section class="py-16 hero-gradient">
       <div class="max-w-4xl mx-auto px-4 text-center text-white">
-        <h2 class="font-display text-3xl font-bold mb-4">Ready to Find Your Space?</h2>
-        <p class="text-orange-100 text-lg mb-8">Browse our curated collection of family-friendly venues near Patterson Park.</p>
+        <h2 class="font-display text-3xl font-bold mb-4">${page?.aboutCtaHeading ?? 'Ready to Find Your Space?'}</h2>
+        <p class="text-orange-100 text-lg mb-8">${page?.aboutCtaSubtext ?? 'Browse our curated collection of family-friendly venues near Patterson Park.'}</p>
         <div class="flex flex-col sm:flex-row gap-4 justify-center">
-          <a href="/venues" class="px-8 py-4 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors shadow-lg">Browse Venues</a>
-          <a href="/contact" class="px-8 py-4 border-2 border-white/30 text-white font-semibold rounded-xl hover:bg-white/10 transition-colors">Get in Touch</a>
+          <a href="/venues" class="px-8 py-4 bg-white text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-colors shadow-lg">${page?.aboutCtaBtnPrimary ?? 'Browse Venues'}</a>
+          <a href="/contact" class="px-8 py-4 border-2 border-white/30 text-white font-semibold rounded-xl hover:bg-white/10 transition-colors">${page?.aboutCtaBtnSecondary ?? 'Get in Touch'}</a>
         </div>
       </div>
     </section>
@@ -1622,48 +1947,21 @@ function renderAboutPage(allVenues: VenueData[] = VENUES) {
 // CONTACT PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-bmore.get('/contact', (c) => {
-  return c.html(bmoreLayout('Contact', renderContactPage(), { activeNav: 'contact' }))
+bmore.get('/contact', async (c) => {
+  const page = await getPageFromDB(c.env.DB, 'contact')
+  const turnstileCfg = await getTurnstileConfig(c.env.DB)
+  return c.html(bmoreLayout(page?.pageHeading ? page.pageHeading : 'Contact', renderContactPage(page, turnstileCfg), { activeNav: 'contact' }))
 })
 
-bmore.post('/contact', async (c) => {
-  const body = await c.req.json()
-  const db = c.env.DB
 
-  try {
-    const col = await db.prepare(
-      "SELECT id FROM collections WHERE name = ? AND is_active = 1"
-    ).bind("contacts").first<{ id: string }>()
-
-    if (col) {
-      const id = crypto.randomUUID()
-      const now = Date.now()
-      await db.prepare(`
-        INSERT INTO content (id, collection_id, slug, title, data, status, author_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        id, col.id,
-        `contact-${id.slice(0, 8)}`,
-        `Contact: ${body.name || 'Anonymous'} - ${body.subject || 'General'}`,
-        JSON.stringify({ ...body, status: 'new' }),
-        'published', SYSTEM_USER_ID, now, now
-      ).run()
-    }
-  } catch {
-    // Silently continue — still return success to the user
-  }
-
-  return c.json({ success: true, message: 'Thank you! We\'ll get back to you within 24 hours.' })
-})
-
-function renderContactPage() {
+function renderContactPage(page: PageData | null = null, turnstileCfg: TurnstileConfig | null = null) {
   return html`
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
         <!-- Contact Form -->
         <div>
-          <h1 class="font-display text-3xl font-bold text-gray-900 mb-4">Get in Touch</h1>
-          <p class="text-gray-500 mb-8">Have a question about a venue or need help planning your event? We'd love to hear from you.</p>
+          <h1 class="font-display text-3xl font-bold text-gray-900 mb-4">${page?.pageHeading ?? 'Get in Touch'}</h1>
+          <p class="text-gray-500 mb-8">${page?.pageSubtext ?? 'Have a question about a venue or need help planning your event? We\'d love to hear from you.'}</p>
 
           <form id="contact-form" class="space-y-6">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1693,6 +1991,7 @@ function renderContactPage() {
             <button type="submit" class="w-full py-3 bg-orange-500 text-white font-semibold rounded-xl hover:bg-orange-600 transition-colors">
               Send Message
             </button>
+            ${raw(turnstileCfg ? turnstileWidget(turnstileCfg) : '')}
           </form>
 
           <div id="contact-success" class="hidden mt-6 p-4 bg-teal-50 rounded-xl text-teal-800">
@@ -1717,21 +2016,21 @@ function renderContactPage() {
                 <div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center flex-shrink-0">📧</div>
                 <div>
                   <p class="font-medium text-gray-900">Email</p>
-                  <p class="text-gray-500 text-sm">hello@familyfuninbmore.com</p>
+                  <p class="text-gray-500 text-sm">${page?.email ?? 'hello@familyfuninbmore.com'}</p>
                 </div>
               </div>
               <div class="flex items-start gap-4">
                 <div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center flex-shrink-0">📞</div>
                 <div>
                   <p class="font-medium text-gray-900">Phone</p>
-                  <p class="text-gray-500 text-sm">(410) 555-FUN1</p>
+                  <p class="text-gray-500 text-sm">${page?.phone ?? '(410) 555-FUN1'}</p>
                 </div>
               </div>
               <div class="flex items-start gap-4">
                 <div class="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center flex-shrink-0">🕐</div>
                 <div>
                   <p class="font-medium text-gray-900">Hours</p>
-                  <p class="text-gray-500 text-sm">Mon-Fri: 9am - 6pm<br>Sat: 10am - 4pm<br>Sun: Closed</p>
+                  <p class="text-gray-500 text-sm">${page?.hours ?? 'Mon-Fri: 9am - 6pm<br>Sat: 10am - 4pm<br>Sun: Closed'}</p>
                 </div>
               </div>
             </div>
@@ -1743,23 +2042,23 @@ function renderContactPage() {
 
           <!-- FAQ -->
           <div class="bg-orange-50 rounded-xl p-6">
-            <h3 class="font-semibold text-gray-900 mb-4">Frequently Asked Questions</h3>
+            <h3 class="font-semibold text-gray-900 mb-4">${page?.faqHeading ?? 'Frequently Asked Questions'}</h3>
             <div class="space-y-4">
               <div>
-                <p class="font-medium text-gray-900 text-sm">How far in advance should I book?</p>
-                <p class="text-gray-500 text-sm mt-1">We recommend booking at least 2 weeks ahead. Popular dates (holidays, summer weekends) should be booked 4-6 weeks in advance.</p>
+                <p class="font-medium text-gray-900 text-sm">${page?.faqQ1 ?? 'How far in advance should I book?'}</p>
+                <p class="text-gray-500 text-sm mt-1">${page?.faqBookingAdvance ?? 'We recommend booking at least 2 weeks ahead. Popular dates (holidays, summer weekends) should be booked 4-6 weeks in advance.'}</p>
               </div>
               <div>
-                <p class="font-medium text-gray-900 text-sm">Is there a cancellation policy?</p>
-                <p class="text-gray-500 text-sm mt-1">Free cancellation up to 48 hours before your event. After that, a 50% fee applies.</p>
+                <p class="font-medium text-gray-900 text-sm">${page?.faqQ2 ?? 'Is there a cancellation policy?'}</p>
+                <p class="text-gray-500 text-sm mt-1">${page?.faqCancellation ?? 'Free cancellation up to 48 hours before your event. After that, a 50% fee applies.'}</p>
               </div>
               <div>
-                <p class="font-medium text-gray-900 text-sm">Can I tour a venue before booking?</p>
-                <p class="text-gray-500 text-sm mt-1">Absolutely! Contact us and we'll arrange a visit with the venue coordinator.</p>
+                <p class="font-medium text-gray-900 text-sm">${page?.faqQ3 ?? 'Can I tour a venue before booking?'}</p>
+                <p class="text-gray-500 text-sm mt-1">${page?.faqTour ?? 'Absolutely! Contact us and we\'ll arrange a visit with the venue coordinator.'}</p>
               </div>
               <div>
-                <p class="font-medium text-gray-900 text-sm">Do you handle catering?</p>
-                <p class="text-gray-500 text-sm mt-1">We don't provide catering directly, but many of our venues have kitchen facilities and we can recommend local caterers.</p>
+                <p class="font-medium text-gray-900 text-sm">${page?.faqQ4 ?? 'Do you handle catering?'}</p>
+                <p class="text-gray-500 text-sm mt-1">${page?.faqCatering ?? 'We don\'t provide catering directly, but many of our venues have kitchen facilities and we can recommend local caterers.'}</p>
               </div>
             </div>
           </div>
@@ -1778,27 +2077,141 @@ function renderContactPage() {
         // Contact form
         document.getElementById('contact-form').addEventListener('submit', async function(e) {
           e.preventDefault()
+          const btn = this.querySelector('button[type="submit"]')
+          btn.disabled = true
+          btn.textContent = 'Sending...'
+
           const formData = new FormData(this)
           const data = Object.fromEntries(formData)
 
+          // Include Turnstile token if widget is present
+          const tsToken = document.querySelector('.cf-turnstile [name="cf-turnstile-response"]')?.value
+          if (tsToken) data.turnstile = tsToken
+
           try {
-            const res = await fetch('/contact', {
+            const res = await fetch('/forms/contact/submit', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(data)
+              body: JSON.stringify({ data })
             })
+            const result = await res.json()
             if (res.ok) {
               this.reset()
+              if (window.turnstile) window.turnstile.reset()
               document.getElementById('contact-success').classList.remove('hidden')
               setTimeout(() => document.getElementById('contact-success').classList.add('hidden'), 5000)
+            } else {
+              alert(result.error || 'Something went wrong. Please try again.')
             }
           } catch (err) {
             alert('Something went wrong. Please try again.')
+          } finally {
+            btn.disabled = false
+            btn.textContent = 'Send Message'
           }
         })
       });
     </script>
+    ${raw(turnstileCfg ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : '')}
   `
 }
+
+
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// SEED FORMS ROUTE
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+bmore.get('/seed-forms', async (c) => {
+  const db = c.env.DB
+  const authorId = await getAuthorId(db)
+
+  const forms = [
+    {
+      id: 'form-contact',
+      name: 'contact',
+      display_name: 'Contact Form',
+      description: 'General inquiries submitted via the Contact page',
+      category: 'contact',
+      icon: '📧',
+      formio_schema: JSON.stringify({"components":[{"type":"textfield","key":"name","label":"Your Name","validate":{"required":true}},{"type":"email","key":"email","label":"Email Address","validate":{"required":true}},{"type":"select","key":"subject","label":"Subject","data":{"values":[{"value":"general","label":"General Inquiry"},{"value":"booking","label":"Booking Help"},{"value":"venue","label":"Venue Question"},{"value":"partnership","label":"Venue Partnership"},{"value":"feedback","label":"Feedback"}]}},{"type":"textarea","key":"message","label":"Message","validate":{"required":true}},{"type":"button","key":"submit","label":"Send Message","action":"submit"}]}),
+      settings: '{}',
+    },
+    {
+      id: 'form-venue-booking-wizard',
+      name: 'venue-booking-wizard',
+      display_name: 'Venue Booking Wizard',
+      description: 'Venue booking requests submitted via the 6-step booking wizard',
+      category: 'booking',
+      icon: '🏛️',
+      formio_schema: JSON.stringify({"display":"wizard","components":[{"type":"panel","key":"eventDetails","title":"Step 1: Event Details","components":[{"type":"textfield","key":"eventName","label":"Event Name","placeholder":"e.g., Marcus's 5th Birthday Party","validate":{"required":true}},{"type":"select","key":"eventType","label":"Event Type","validate":{"required":true},"data":{"values":[{"label":"Birthday Party","value":"birthday_party"},{"label":"Family Reunion","value":"family_reunion"},{"label":"Baby Shower","value":"baby_shower"},{"label":"Wedding Reception","value":"wedding_reception"},{"label":"Community Meeting","value":"community_meeting"},{"label":"Youth Group","value":"youth_group"},{"label":"Religious Gathering","value":"religious_gathering"},{"label":"Corporate Event","value":"corporate_event"},{"label":"Other","value":"other"}]}},{"type":"columns","columns":[{"width":6,"components":[{"type":"number","key":"adultCount","label":"Number of Adults","defaultValue":20,"validate":{"required":true,"min":1,"max":300}}]},{"width":6,"components":[{"type":"number","key":"childCount","label":"Number of Children","defaultValue":10}]}]}]},{"type":"panel","key":"requirements","title":"Step 2: Requirements","components":[{"type":"select","key":"alcoholRequested","label":"Alcohol Policy","data":{"values":[{"label":"No Alcohol","value":"none"},{"label":"Beer & Wine Only","value":"beer_wine"},{"label":"Full Bar","value":"full_bar"}]}},{"type":"columns","columns":[{"width":6,"components":[{"type":"checkbox","key":"needsKitchen","label":"Kitchen Access Required"}]},{"width":6,"components":[{"type":"checkbox","key":"needsGymnasium","label":"Gymnasium / Large Hall"}]}]},{"type":"textarea","key":"specialRequests","label":"Special Requests or Notes","rows":3}]},{"type":"panel","key":"venueSelection","title":"Step 3: Venue Selection","components":[{"type":"columns","columns":[{"width":6,"components":[{"type":"textfield","key":"venueName","label":"Preferred Venue Name"}]},{"width":6,"components":[{"type":"textfield","key":"venueSlug","label":"Venue Slug","tooltip":"Auto-filled when selected from the venues page"}]}]}]},{"type":"panel","key":"dateTime","title":"Step 4: Date & Time","components":[{"type":"columns","columns":[{"width":6,"components":[{"type":"datetime","key":"eventDate","label":"Event Date","format":"yyyy-MM-dd","enableTime":false,"validate":{"required":true}}]},{"width":6,"components":[{"type":"time","key":"startTime","label":"Start Time","validate":{"required":true}}]}]},{"type":"select","key":"duration","label":"Duration","validate":{"required":true},"data":{"values":[{"label":"1 Hour","value":"1"},{"label":"2 Hours","value":"2"},{"label":"3 Hours","value":"3"},{"label":"4 Hours (Half Day)","value":"4"},{"label":"6 Hours","value":"6"},{"label":"8 Hours (Full Day)","value":"8"}]}}]},{"type":"panel","key":"contactInfo","title":"Step 5: Contact Information","components":[{"type":"columns","columns":[{"width":6,"components":[{"type":"textfield","key":"contactName","label":"Your Name","validate":{"required":true}}]},{"width":6,"components":[{"type":"textfield","key":"organization","label":"Organization (optional)"}]}]},{"type":"columns","columns":[{"width":6,"components":[{"type":"email","key":"contactEmail","label":"Email Address","validate":{"required":true}}]},{"width":6,"components":[{"type":"phoneNumber","key":"contactPhone","label":"Phone Number","validate":{"required":true}}]}]}]},{"type":"panel","key":"reviewConfirm","title":"Step 6: Review & Submit","components":[{"type":"number","key":"estimatedTotal","label":"Estimated Total ($)","disabled":true,"tooltip":"Calculated automatically based on venue rate and duration"},{"type":"checkbox","key":"termsAccepted","label":"I agree to the venue rental terms and conditions","validate":{"required":true}},{"type":"button","key":"submit","label":"Submit Booking Request","action":"submit"}]}]}),
+      settings: '{}',
+    },
+  ]
+
+  let seeded = 0
+  let updated = 0
+  const now = Date.now()
+
+  for (const form of forms) {
+    const existing = await db.prepare(
+      'SELECT id FROM forms WHERE name = ?'
+    ).bind(form.name).first<{ id: string }>()
+
+    if (existing) {
+      // Update schema so re-running /seed-forms refreshes the wizard layout
+      await db.prepare(
+        'UPDATE forms SET display_name = ?, description = ?, formio_schema = ?, turnstile_enabled = 1, updated_at = ? WHERE name = ?'
+      ).bind(form.display_name, form.description, form.formio_schema, now, form.name).run()
+      updated++
+    } else {
+      await db.prepare(`
+        INSERT INTO forms (id, name, display_name, description, category, icon,
+          formio_schema, settings, is_active, is_public, managed, submission_count, turnstile_enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 0, 1, ?, ?)
+      `).bind(
+        form.id, form.name, form.display_name, form.description, form.category, form.icon,
+        form.formio_schema, form.settings, now, now).run()
+      seeded++
+    }
+  }
+
+  return c.json({ success: true, seeded, updated, message: `Forms synced: ${seeded} new, ${updated} updated` })
+})
+bmore.get('/seed-turnstile', async (c) => {
+  const db = c.env.DB
+  const settings = JSON.stringify({
+    enabled: true,
+    siteKey: '0x4AAAAAACmJRAjGlF1gXAj-',
+    secretKey: '0x4AAAAAACmJRKUptgk1Z4zim8Ajir87TQM',
+    theme: 'light',
+    mode: 'managed',
+    preclearance: false
+  })
+  try {
+    const existing = await db.prepare(
+      "SELECT id FROM plugins WHERE id = 'turnstile' LIMIT 1"
+    ).first<{ id: string }>()
+    const now = Date.now()
+    if (existing) {
+      // Plugin already installed - just update settings and activate it
+      await db.prepare(
+        "UPDATE plugins SET settings = ?, status = 'active', updated_at = ? WHERE id = 'turnstile'"
+      ).bind(settings, now).run()
+      return c.json({ success: true, action: 'updated', message: 'Turnstile plugin configured and activated' })
+    } else {
+      // Plugin not yet installed - insert full row
+      await db.prepare(`
+        INSERT INTO plugins (id, name, display_name, description, version, author, category, icon,
+          status, is_core, settings, permissions, dependencies, installed_at, last_updated, updated_at)
+        VALUES ('turnstile', 'turnstile-plugin', 'Cloudflare Turnstile', 'CAPTCHA-free bot protection for forms',
+          '1.0.0', 'SonicJS', 'security', 'shield-check',
+          'active', 0, ?, '[]', '[]', ?, ?, ?)
+      `).bind(settings, now, now, now).run()
+      return c.json({ success: true, action: 'created', message: 'Turnstile plugin installed and configured' })
+    }
+  } catch (err: unknown) {
+    return c.json({ error: 'Failed to configure Turnstile', detail: String(err) }, 500)
+  }
+})
 
 export default bmore
