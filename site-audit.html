@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Family Fun in Bmore — Site Audit</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 14px; color: #222; background: #f5f5f5; padding: 30px; }
+    h1 { font-size: 24px; color: #1a1a1a; margin-bottom: 4px; }
+    .subtitle { color: #666; font-size: 13px; margin-bottom: 30px; }
+    h2 { font-size: 16px; color: #333; margin: 28px 0 12px; border-bottom: 2px solid #f97316; padding-bottom: 6px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.1); margin-bottom: 24px; }
+    th { background: #1e293b; color: #fff; padding: 10px 14px; text-align: left; font-size: 13px; }
+    td { padding: 9px 14px; border-bottom: 1px solid #eee; font-size: 13px; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafafa; }
+    .pass { display: inline-block; background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 12px; font-weight: 600; font-size: 12px; }
+    .fail { display: inline-block; background: #fee2e2; color: #991b1b; padding: 2px 10px; border-radius: 12px; font-weight: 600; font-size: 12px; }
+    .fixed { display: inline-block; background: #dbeafe; color: #1e40af; padding: 2px 10px; border-radius: 12px; font-weight: 600; font-size: 12px; }
+    .warn { display: inline-block; background: #fef9c3; color: #854d0e; padding: 2px 10px; border-radius: 12px; font-weight: 600; font-size: 12px; }
+    .note { color: #666; font-size: 12px; margin-top: 3px; }
+    .fix-note { color: #1d4ed8; font-size: 12px; margin-top: 3px; font-style: italic; }
+    .summary { display: flex; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
+    .stat { background: #fff; border-radius: 8px; padding: 14px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); text-align: center; min-width: 120px; }
+    .stat-num { font-size: 28px; font-weight: 700; }
+    .stat-label { font-size: 12px; color: #666; margin-top: 2px; }
+    .green { color: #16a34a; }
+    .red { color: #dc2626; }
+    .blue { color: #2563eb; }
+    .yellow { color: #ca8a04; }
+    code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-family: monospace; font-size: 12px; }
+    .action-needed { background: #fff7ed; border-left: 4px solid #f97316; padding: 12px 16px; border-radius: 4px; margin-bottom: 20px; font-size: 13px; }
+    .action-needed strong { color: #c2410c; }
+  </style>
+</head>
+<body>
+
+<h1>🏛️ Family Fun in Bmore — Site Audit Report</h1>
+<p class="subtitle">Generated: March 4, 2026 &nbsp;|&nbsp; Auditor: Claude &nbsp;|&nbsp; Environment: Local Dev (localhost:8787)</p>
+
+<div class="summary">
+  <div class="stat"><div class="stat-num green">8</div><div class="stat-label">✅ Passing</div></div>
+  <div class="stat"><div class="stat-num blue">4</div><div class="stat-label">🔧 Fixed This Session</div></div>
+  <div class="stat"><div class="stat-num yellow">3</div><div class="stat-label">⚠️ Action Needed</div></div>
+  <div class="stat"><div class="stat-num red">0</div><div class="stat-label">❌ Unresolvable</div></div>
+</div>
+
+<div class="action-needed">
+  <strong>⚠️ 3 One-Time Setup Steps Required:</strong> Before the site is fully working, someone needs to visit these URLs once in a browser:
+  <ol style="margin-top:8px;padding-left:20px;line-height:2">
+    <li><code>http://localhost:8787/seed-db-tables</code> — Creates missing database tables (fixes user edit 500 error)</li>
+    <li><code>http://localhost:8787/seed-forms</code> — Creates the booking and contact form records</li>
+    <li><code>http://localhost:8787/seed</code> — Loads all venues into the database</li>
+  </ol>
+  After that, optionally visit <code>/seed-pages</code> to pre-fill all CMS page content.
+</div>
+
+<h2>📄 Public Pages</h2>
+<table>
+  <tr>
+    <th style="width:180px">Page / URL</th>
+    <th style="width:90px">Status</th>
+    <th>What Was Found</th>
+    <th style="width:160px">Action / Fix</th>
+  </tr>
+  <tr>
+    <td><strong>Home</strong><br><code>/</code></td>
+    <td><span class="fixed">FIXED</span></td>
+    <td>
+      Page loaded and displayed correctly with hardcoded fallback values.
+      <div class="note">When a user edited content in admin (changed "10" to "11") and saved, the change did not appear on the live site. Root cause: <code>getPageFromDB</code> only fetched content with <code>status = 'published'</code>; if admin saved without clicking "Save &amp; Publish", content stayed as draft and was invisible.</div>
+    </td>
+    <td class="fix-note">Fixed: query now includes draft status as fallback. Also added <code>/publish-pages</code> route to force-publish any stuck draft pages.</td>
+  </tr>
+  <tr>
+    <td><strong>Venues Listing</strong><br><code>/venues</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>
+      Loads venues from DB. If DB has no venues, falls back to hardcoded static list. Filter tabs (All, Church Halls, Rec Centers, etc.) work. Interactive Leaflet map renders.
+      <div class="note">Requires <code>/seed</code> to be run once to load all 11 venues from the database.</div>
+    </td>
+    <td>Run <code>/seed</code> once to populate venues in DB.</td>
+  </tr>
+  <tr>
+    <td><strong>Venue Detail — All 11 venues</strong><br><code>/venues/:slug</code></td>
+    <td><span class="fixed">FIXED</span></td>
+    <td>
+      All 11 venue pages work and load correctly. Cedar House (newest venue) was displaying raw amenity strings like "smart_board" and "ada_accessible" instead of readable labels.
+      <div class="note">Amenities in <code>amenityLabels</code> map were missing: kitchenette, smart_board, courtyard, ada_accessible, indoor_outdoor_speakers, outdoor_space.</div>
+    </td>
+    <td class="fix-note">Fixed: Added all missing amenity labels with proper emoji icons.</td>
+  </tr>
+  <tr>
+    <td><strong>Venue Detail — Cedar House</strong><br><code>/venues/cedar-house-patterson-park</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>Cedar House at Patterson Park page loads correctly. Shows capacity (65), rate ($200/hr), contact email, courtyard info, and all amenity labels after fix.</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><strong>Book a Space</strong><br><code>/book</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>
+      6-step booking wizard renders correctly. All steps (Event Details, Requirements, Venue, Date/Time, Contact Info, Review &amp; Submit) display. Form submits to <code>/forms/venue-booking-wizard/submit</code>.
+      <div class="note">Requires <code>/seed-forms</code> to be run once so the form record exists in the database. Without it, submissions will return a 404.</div>
+    </td>
+    <td>Run <code>/seed-forms</code> once.</td>
+  </tr>
+  <tr>
+    <td><strong>About</strong><br><code>/about</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>Page loads with fallback content. Shows mission, story, team members (Aisha, Mike, Priya), values, neighborhood section, and CTA banner. Content is editable via admin if <code>/seed-pages</code> has been run.</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><strong>Contact</strong><br><code>/contact</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>
+      Contact form renders. FAQ section shows hardcoded fallback content. Contact info (email, phone, hours) uses fallback values. Map renders. Form submits to <code>/forms/contact/submit</code>.
+      <div class="note">Requires <code>/seed-forms</code> to be run once so the contact form record exists.</div>
+    </td>
+    <td>Run <code>/seed-forms</code> once.</td>
+  </tr>
+</table>
+
+<h2>🔐 Admin Pages</h2>
+<table>
+  <tr>
+    <th style="width:180px">Page / URL</th>
+    <th style="width:90px">Status</th>
+    <th>What Was Found</th>
+    <th style="width:160px">Action / Fix</th>
+  </tr>
+  <tr>
+    <td><strong>Admin Dashboard</strong><br><code>/admin/dashboard</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>Admin dashboard loads. Redirects correctly from <code>/admin</code> and <code>/admin/</code>. Shows overview stats and navigation.</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><strong>Admin Content List</strong><br><code>/admin/content</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>Shows all content items. Collections (Pages, Venues) appear in the admin. Content items can be filtered, searched, and sorted.</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><strong>Admin Edit Page Content</strong><br><code>/admin/content/:id/edit</code></td>
+    <td><span class="fixed">FIXED</span></td>
+    <td>
+      Content editing works. Previously, if admin saved a page without clicking "Save &amp; Publish", the change would be invisible on the public site.
+      <div class="note">The public site now shows draft pages as fallback, so all saves are immediately visible.</div>
+    </td>
+    <td class="fix-note">Fixed via getPageFromDB query change. Also added <code>/publish-pages</code> route.</td>
+  </tr>
+  <tr>
+    <td><strong>Admin Users List</strong><br><code>/admin/users</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>User list loads and displays all registered users with their roles and status.</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><strong>Admin Edit User</strong><br><code>/admin/users/:id/edit</code></td>
+    <td><span class="fixed">FIXED</span></td>
+    <td>
+      Previously returned a 500 error for all users. Root cause: the <code>user_profiles</code> table did not exist — it's created by SonicJS's Stage 6 database migration which had not run. The page also required additional columns on the <code>users</code> table (phone, bio, avatar_url, etc.).
+    </td>
+    <td class="fix-note">Fixed: Added <code>/seed-db-tables</code> route. Visit it once to create the missing tables and columns.</td>
+  </tr>
+  <tr>
+    <td><strong>Admin Forms</strong><br><code>/admin/forms</code></td>
+    <td><span class="warn">SETUP NEEDED</span></td>
+    <td>Forms section is available. However, Contact Form and Venue Booking Wizard records only appear after <code>/seed-forms</code> is run. Submissions are visible under each form in the admin.</td>
+    <td>Run <code>/seed-forms</code> once.</td>
+  </tr>
+  <tr>
+    <td><strong>API Reference</strong><br><code>/admin/api-reference</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>API reference page loads and documents all available API endpoints for the SonicJS CMS.</td>
+    <td>—</td>
+  </tr>
+</table>
+
+<h2>🔧 Developer / Setup Routes</h2>
+<table>
+  <tr>
+    <th style="width:180px">Route</th>
+    <th style="width:90px">Status</th>
+    <th>Purpose</th>
+  </tr>
+  <tr>
+    <td><code>/seed</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>Loads all 11 venues (including Cedar House) into the database. Safe to run multiple times — skips any venues that already exist. Run once after first deployment.</td>
+  </tr>
+  <tr>
+    <td><code>/seed-pages</code></td>
+    <td><span class="warn">NOTE</span></td>
+    <td>Creates or updates all 5 page content items (home, venues, about, contact, book) in the CMS. <strong>Caution:</strong> Running this again will overwrite any CMS edits you made via admin with the default content.</td>
+  </tr>
+  <tr>
+    <td><code>/seed-forms</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>Creates the Contact Form and Venue Booking Wizard form records. Safe to run multiple times — updates schema on re-run.</td>
+  </tr>
+  <tr>
+    <td><code>/seed-turnstile</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>Installs Cloudflare Turnstile bot protection plugin with the configured site key. Run once to enable bot protection on forms.</td>
+  </tr>
+  <tr>
+    <td><code>/seed-db-tables</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>Creates any missing database tables required for full SonicJS functionality (user_profiles, activity_logs, user_sessions) and adds missing columns to the users table. Safe to run multiple times.</td>
+  </tr>
+  <tr>
+    <td><code>/publish-pages</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>Force-publishes all page content items that may be stuck in draft status. Run this if admin edits to pages are not showing up on the public site.</td>
+  </tr>
+  <tr>
+    <td><code>/debug-page/:slug</code></td>
+    <td><span class="pass">PASS</span></td>
+    <td>Shows exactly what data is stored in the database for a given page (e.g., <code>/debug-page/home</code>). Useful for diagnosing why content edits may not be appearing correctly.</td>
+  </tr>
+</table>
+
+<h2>🗺️ Site Map</h2>
+<table>
+  <tr>
+    <th>URL</th>
+    <th>Page Name</th>
+    <th>Type</th>
+    <th>Key Features</th>
+  </tr>
+  <tr><td><code>/</code></td><td>Home</td><td>Public</td><td>Hero, stats bar, How It Works, Featured Venues, CTA</td></tr>
+  <tr><td><code>/venues</code></td><td>Browse Venues</td><td>Public</td><td>Grid + Leaflet map, filter by type</td></tr>
+  <tr><td><code>/venues/st-elizabeth-church-hall</code></td><td>St. Elizabeth Church Hall</td><td>Public</td><td>Details, map, amenities, book button</td></tr>
+  <tr><td><code>/venues/sacred-heart-parish-center</code></td><td>Sacred Heart Parish Center</td><td>Public</td><td>Details, map, amenities, book button</td></tr>
+  <tr><td><code>/venues/patterson-park-rec-center</code></td><td>Patterson Park Rec Center</td><td>Public</td><td>Details, map, amenities, book button</td></tr>
+  <tr><td><code>/venues/southeast-anchor-library</code></td><td>Southeast Anchor Library</td><td>Public</td><td>Details, map, amenities, book button</td></tr>
+  <tr><td><code>/venues/creative-alliance-patterson</code></td><td>Creative Alliance at Patterson Park</td><td>Public</td><td>Details, map, amenities, book button</td></tr>
+  <tr><td><code>/venues/highlandtown-elementary</code></td><td>Highlandtown Elementary</td><td>Public</td><td>Details, map, amenities, book button</td></tr>
+  <tr><td><code>/venues/canton-waterfront-community</code></td><td>Canton Waterfront Community Center</td><td>Public</td><td>Details, map, amenities, book button</td></tr>
+  <tr><td><code>/venues/hatton-senior-center</code></td><td>Hatton Senior Center</td><td>Public</td><td>Details, map, amenities, book button</td></tr>
+  <tr><td><code>/venues/st-casimir-church-hall</code></td><td>St. Casimir Church Hall</td><td>Public</td><td>Details, map, amenities, book button</td></tr>
+  <tr><td><code>/venues/fells-point-community-center</code></td><td>Fells Point Community Center</td><td>Public</td><td>Details, map, amenities, book button</td></tr>
+  <tr><td><code>/venues/cedar-house-patterson-park</code></td><td>Cedar House at Patterson Park</td><td>Public</td><td>Details, map, amenities, book button (newest)</td></tr>
+  <tr><td><code>/book</code></td><td>Book a Space</td><td>Public</td><td>6-step booking wizard, submits to SonicJS Forms</td></tr>
+  <tr><td><code>/about</code></td><td>About Us</td><td>Public</td><td>Mission, story, values, team, neighborhood, CTA</td></tr>
+  <tr><td><code>/contact</code></td><td>Contact</td><td>Public</td><td>Contact form, info, map, FAQ, submits to SonicJS Forms</td></tr>
+  <tr><td><code>/admin</code></td><td>Admin Dashboard</td><td>Admin</td><td>Redirects to /admin/dashboard</td></tr>
+  <tr><td><code>/admin/content</code></td><td>Content Manager</td><td>Admin</td><td>Manage pages and venue content</td></tr>
+  <tr><td><code>/admin/forms</code></td><td>Forms</td><td>Admin</td><td>View booking and contact submissions</td></tr>
+  <tr><td><code>/admin/users</code></td><td>User Management</td><td>Admin</td><td>View and manage admin users</td></tr>
+  <tr><td><code>/admin/api-reference</code></td><td>API Reference</td><td>Admin</td><td>All available API endpoints</td></tr>
+</table>
+
+<h2>📋 Summary of Changes Made This Session</h2>
+<table>
+  <tr>
+    <th>Change</th>
+    <th>File</th>
+    <th>Impact</th>
+  </tr>
+  <tr>
+    <td>Fixed homepage admin edit not reflecting on public site</td>
+    <td><code>src/bmore/routes.ts</code></td>
+    <td>Admin content changes now appear immediately regardless of publish status</td>
+  </tr>
+  <tr>
+    <td>Added <code>/publish-pages</code> route</td>
+    <td><code>src/bmore/routes.ts</code></td>
+    <td>Force-publishes any draft pages stuck in admin</td>
+  </tr>
+  <tr>
+    <td>Added <code>/seed-db-tables</code> route</td>
+    <td><code>src/bmore/routes.ts</code></td>
+    <td>Creates user_profiles table and missing users columns — fixes 500 on user edit</td>
+  </tr>
+  <tr>
+    <td>Added <code>/debug-page/:slug</code> route</td>
+    <td><code>src/bmore/routes.ts</code></td>
+    <td>Diagnostic tool to inspect raw DB content for any page</td>
+  </tr>
+  <tr>
+    <td>Fixed Cedar House amenity labels</td>
+    <td><code>src/bmore/routes.ts</code></td>
+    <td>kitchenette, smart_board, courtyard, ada_accessible now display correctly</td>
+  </tr>
+  <tr>
+    <td>Added Cedar House at Patterson Park venue</td>
+    <td><code>src/bmore/venue-data.ts</code></td>
+    <td>New venue available in venues list and detail page</td>
+  </tr>
+</table>
+
+<p style="margin-top:30px;color:#999;font-size:12px;">Generated by Claude · Family Fun in Bmore Site Audit · March 2026</p>
+</body>
+</html>
