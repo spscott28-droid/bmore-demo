@@ -503,15 +503,8 @@ function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES, 
             </div>
             <div class="hidden md:block">
               <div class="relative">
-                <div class="rounded-2xl shadow-2xl overflow-hidden bg-gradient-to-br from-orange-400 to-orange-700" style="height:420px;position:relative;">
-                  <!-- decorative background shown when photo doesn't load -->
-                  <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px;opacity:0.25;">
-                    <svg viewBox="0 0 200 120" style="width:100%;max-width:320px;fill:white;" xmlns="http://www.w3.org/2000/svg">
-                      <rect x="10" y="60" width="30" height="60"/><rect x="50" y="40" width="30" height="80"/><rect x="90" y="20" width="40" height="100"/><rect x="140" y="50" width="25" height="70"/><rect x="170" y="70" width="20" height="50"/>
-                      <rect x="0" y="115" width="200" height="5" rx="2"/>
-                    </svg>
-                  </div>
-                  <img src="https://images.unsplash.com/photo-1529543544282-ea57407bc2f7?w=600&h=500&fit=crop" alt="" role="presentation" class="w-full h-full object-cover absolute inset-0" style="color:transparent;" onerror="this.style.display='none'" />
+                <div class="rounded-2xl shadow-2xl overflow-hidden bg-gradient-to-br from-orange-400 to-orange-700" style="height:420px;">
+                  <img src="https://images.unsplash.com/photo-1529543544282-ea57407bc2f7?w=600&h=500&fit=crop" alt="" class="w-full h-full object-cover" style="color:transparent;" onerror="this.style.display='none'" />
                 </div>
                 <div class="absolute -bottom-4 -left-4 bg-white rounded-xl p-4 shadow-lg">
                   <div class="flex items-center gap-3">
