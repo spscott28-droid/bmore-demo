@@ -503,7 +503,9 @@ function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES, 
             </div>
             <div class="hidden md:block">
               <div class="relative">
-                <img src="https://images.unsplash.com/photo-1529543544282-ea57407bc2f7?w=600&h=500&fit=crop" alt="Baltimore community gathering" class="rounded-2xl shadow-2xl w-full object-cover" style="max-height:500px" />
+                <div class="rounded-2xl shadow-2xl overflow-hidden bg-gradient-to-br from-orange-400 to-orange-700" style="max-height:500px;min-height:320px;">
+                  <img src="https://images.unsplash.com/photo-1529543544282-ea57407bc2f7?w=600&h=500&fit=crop" alt="Baltimore community gathering" class="w-full h-full object-cover" style="max-height:500px;color:transparent;" onerror="this.style.opacity='0'" />
+                </div>
                 <div class="absolute -bottom-4 -left-4 bg-white rounded-xl p-4 shadow-lg">
                   <div class="flex items-center gap-3">
                     <span class="text-3xl">🏛️</span>
