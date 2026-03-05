@@ -501,18 +501,13 @@ function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES, 
                 </a>
               </div>
             </div>
-            <div class="hidden md:block">
-              <div class="relative">
-                <div class="rounded-2xl shadow-2xl overflow-hidden bg-gradient-to-br from-orange-400 to-orange-700" style="height:420px;">
-                  <img src="https://images.unsplash.com/photo-1529543544282-ea57407bc2f7?w=600&h=500&fit=crop" alt="" class="w-full h-full object-cover" style="color:transparent;" onerror="this.style.display='none'" />
-                </div>
-                <div class="absolute -bottom-4 -left-4 bg-white rounded-xl p-4 shadow-lg">
-                  <div class="flex items-center gap-3">
-                    <span class="text-3xl">🏛️</span>
-                    <div>
-                      <p class="font-bold text-gray-900">${page?.statVenues ?? '10+'} Venues</p>
-                      <p class="text-gray-500 text-sm">${page?.statVenuesLabel ?? 'Near Patterson Park'}</p>
-                    </div>
+            <div class="hidden md:flex items-end justify-start">
+              <div class="bg-white rounded-xl p-4 shadow-lg">
+                <div class="flex items-center gap-3">
+                  <span class="text-3xl">🏛️</span>
+                  <div>
+                    <p class="font-bold text-gray-900">${page?.statVenues ?? '10+'} Venues</p>
+                    <p class="text-gray-500 text-sm">${page?.statVenuesLabel ?? 'Near Patterson Park'}</p>
                   </div>
                 </div>
               </div>
