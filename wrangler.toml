@@ -22,16 +22,19 @@ migrations_dir = "./node_modules/@sonicjs-cms/core/migrations"
 binding = "CACHE_KV"
 id = "YOUR_KV_NAMESPACE_ID_HERE"
 
-# R2 Bucket for media storage (optional — needed for admin file uploads)
-# 1. Run: wrangler r2 bucket create bmore-media
-# 2. Uncomment the lines below
-# [[r2_buckets]]
-# binding = "MEDIA_BUCKET"
-# bucket_name = "bmore-media"
+# R2 Bucket for media storage (needed for admin image uploads)
+# Bucket was created via: wrangler r2 bucket create bmore-media
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "bmore-media"
 
 # Environment variables
 [vars]
 ENVIRONMENT = "development"
+# R2 public bucket URL hash — after creating the bucket and enabling public access
+# in the Cloudflare dashboard, copy the hash from the R2.dev URL they give you
+# e.g. if your public URL is https://pub-abc123.r2.dev then set: BUCKET_NAME = "abc123"
+BUCKET_NAME = "bmore-media"
 
 # Observability (optional)
 [observability]
