@@ -508,8 +508,8 @@ function renderHomePage(featured: VenueData[], allVenues: VenueData[] = VENUES, 
                   <div class="flex items-center gap-3">
                     <span class="text-3xl">🏛️</span>
                     <div>
-                      <p class="font-bold text-gray-900">10+ Venues</p>
-                      <p class="text-gray-500 text-sm">Near Patterson Park</p>
+                      <p class="font-bold text-gray-900">${page?.statVenues ?? '10+'} Venues</p>
+                      <p class="text-gray-500 text-sm">${page?.statVenuesLabel ?? 'Near Patterson Park'}</p>
                     </div>
                   </div>
                 </div>
