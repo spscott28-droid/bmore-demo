@@ -34,7 +34,7 @@ ENVIRONMENT = "development"
 # R2 public bucket URL hash — after creating the bucket and enabling public access
 # in the Cloudflare dashboard, copy the hash from the R2.dev URL they give you
 # e.g. if your public URL is https://pub-abc123.r2.dev then set: BUCKET_NAME = "abc123"
-BUCKET_NAME = "bmore-media"
+BUCKET_NAME = "f7cb3bf48dc0416f920c9a410a3828ac"
 
 # Observability (optional)
 [observability]
